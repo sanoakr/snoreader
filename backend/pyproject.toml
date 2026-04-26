@@ -1,0 +1,25 @@
+[project]
+name = "snoreader"
+version = "0.1.0"
+description = "Self-hosted RSS reader"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    "pydantic-settings>=2.0",
+    "feedparser>=6.0",
+    "trafilatura>=2.0",
+    "apscheduler>=3.10",
+    "httpx>=0.28",
+    "python-multipart>=0.0.20",
+    "greenlet>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
