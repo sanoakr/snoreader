@@ -66,6 +66,17 @@ async def list_articles(
 
 @router.get("/articles/{article_id}", response_model=ArticleDetail)
 async def get_article(article_id: int, session: AsyncSession = Depends(get_session)):
+    article = await session.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    if not article.content and article.url and not article.url.startswith("snoreader://"):
+        from app.services.content_extractor import extract_content
+        content = await extract_content(article.url)
+        if content:
+            article.content = content
+            await session.commit()
+
     stmt = (
         select(Article, Feed.title.label("feed_title"))
         .join(Feed)

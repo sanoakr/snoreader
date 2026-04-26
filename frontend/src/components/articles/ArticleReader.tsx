@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
-import { useUpdateArticle, useExtractArticle, useSummarizeArticle, useSuggestTags, useAiStatus } from '../../hooks/useArticles';
+import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus } from '../../hooks/useArticles';
 import { useAddTag, useRemoveTag } from '../../hooks/useTags';
 
 interface Props {
@@ -15,7 +15,6 @@ export function ArticleReader({ articleId }: Props) {
     queryFn: () => getArticle(articleId),
   });
   const updateArticle = useUpdateArticle();
-  const extractArticle = useExtractArticle();
   const summarizeArticle = useSummarizeArticle();
   const suggestTags = useSuggestTags();
   const addTag = useAddTag();
@@ -76,22 +75,21 @@ export function ArticleReader({ articleId }: Props) {
       <article className="max-w-3xl mx-auto p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-2">
-            {article.title}
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-blue-600 dark:hover:text-blue-400"
+            >
+              {article.title}
+            </a>
           </h1>
           <div className="flex items-center gap-3 text-sm text-gray-500">
             {article.feed_title && <span>{article.feed_title}</span>}
             {article.author && <span>by {article.author}</span>}
             {publishedDate && <span>{publishedDate}</span>}
           </div>
-          <div className="mt-3 flex gap-3">
-            <a
-              href={article.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-500 hover:text-blue-700"
-            >
-              Open original →
-            </a>
+          <div className="mt-3">
             <button
               onClick={() => updateArticle.mutate({ id: article.id, data: { is_saved: !article.is_saved } })}
               className={`text-sm ${article.is_saved ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
@@ -195,17 +193,8 @@ export function ArticleReader({ articleId }: Props) {
             dangerouslySetInnerHTML={{ __html: article.content }}
           />
         ) : (
-          <div>
-            <button
-              onClick={() => extractArticle.mutate(article.id)}
-              disabled={extractArticle.isPending}
-              className="mb-4 px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
-            >
-              {extractArticle.isPending ? 'Extracting...' : 'Extract full content'}
-            </button>
-            <div className="text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-wrap">
-              {article.summary || 'No content available.'}
-            </div>
+          <div className="text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-wrap">
+            {article.summary || 'No content available.'}
           </div>
         )}
       </article>

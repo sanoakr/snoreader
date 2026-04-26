@@ -72,9 +72,6 @@ export function markAllRead(feedId?: number): Promise<{ marked: number }> {
   });
 }
 
-export function extractArticle(id: number): Promise<ArticleDetail> {
-  return fetchJSON(`${BASE}/articles/${id}/extract`, { method: 'POST' });
-}
 
 // --- AI ---
 

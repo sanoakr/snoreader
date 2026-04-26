@@ -15,6 +15,16 @@ router = APIRouter(tags=["import"])
 
 _IMPORTED_FEED_URL = "snoreader://imported"
 
+_FEED_URL_PATTERNS = re.compile(
+    r"(/feed|/rss|/atom|\.xml|\.rss|\.atom|/feeds?/)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_feed_url(url: str) -> bool:
+    """Heuristic: does this URL look like an RSS/Atom feed endpoint?"""
+    return bool(_FEED_URL_PATTERNS.search(url))
+
 
 def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()[:1000]
@@ -47,6 +57,9 @@ def _parse_reader_item(item: dict) -> dict:
         summary_raw = item["summary"].get("content", "")
     elif "content" in item:
         summary_raw = item["content"].get("content", "")
+
+    if feed_url and not _looks_like_feed_url(feed_url):
+        feed_url = ""
 
     return {
         "url": url,

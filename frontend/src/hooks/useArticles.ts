@@ -32,15 +32,6 @@ export function useMarkAllRead() {
   });
 }
 
-export function useExtractArticle() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => api.extractArticle(id),
-    onSuccess: (data) => {
-      qc.setQueryData(['article', data.id], data);
-    },
-  });
-}
 
 export function useSummarizeArticle() {
   const qc = useQueryClient();

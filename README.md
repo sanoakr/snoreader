@@ -85,44 +85,6 @@ Inoreader の Saved (starred) 記事を SnoReader にインポートできる。
 2. エクスポートされた JSON (starred.json) をダウンロード
 3. SnoReader サイドバーの **Import Saved Articles (JSON)** からアップロード
 
-### 方法 2: ブラウザスクリプト (フリープランでも利用可)
-
-アカウント情報の共有は不要。ブラウザの既存セッションを利用する。
-
-1. ブラウザで Inoreader にログイン
-2. 左メニューから **Starred** (星マーク) ビューを開く
-3. ページの一番下までスクロールして全記事を読み込む (記事が多い場合は繰り返す)
-4. **F12** キーで DevTools を開き、**Console** タブを選択
-5. 以下のスクリプトをペーストして Enter
-6. `inoreader-saved.json` が自動ダウンロードされる
-7. SnoReader のサイドバーで **Import Saved Articles (JSON)** からアップロード
-
-```javascript
-// Inoreader Saved/Starred articles extractor
-// 記事コンテナ: div.ar, タイトルリンク: .article_title_link, フィード名: .article_feed_title
-const articles = [...document.querySelectorAll('div.ar')].map(el => {
-  const titleLink = el.querySelector('.article_title_link');
-  const feedEl = el.querySelector('.article_feed_title') ||
-                 el.querySelector('.article_tile_footer_feed_title > a');
-  const subTitle = el.querySelector('.article_sub_title');
-  return {
-    url: titleLink?.href || '',
-    title: titleLink?.textContent?.trim() || '',
-    feed_title: feedEl?.textContent?.trim() || '',
-    summary: subTitle?.textContent?.trim() || '',
-  };
-}).filter(a => a.url && !a.url.startsWith('javascript:'));
-
-const blob = new Blob([JSON.stringify(articles, null, 2)], {type: 'application/json'});
-const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-a.download = 'inoreader-saved.json'; a.click();
-console.log(`Exported ${articles.length} articles`);
-```
-
-出力された `inoreader-saved.json` を SnoReader の **Import Saved Articles (JSON)** からアップロード。
-
-> **Note:** Inoreader の DOM 構造はアップデートで変わる可能性がある。`div.ar` や `.article_title_link` が見つからない場合は、DevTools の Elements パネルで実際のクラス名を確認して調整する。
-
 ### 対応フォーマット
 
 - Inoreader / Google Reader 形式 (`{"items": [...]}`)
