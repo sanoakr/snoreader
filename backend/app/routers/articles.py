@@ -225,6 +225,13 @@ async def extract_article_content(
     content = await extract_content(article.url)
     if content:
         article.content = content
+
+        from app.ai.summarizer import summarize_article as _summarize
+        text = content or article.summary or ""
+        summary = await _summarize(article.title, text)
+        if summary:
+            article.ai_summary = summary
+
         await session.commit()
 
     stmt = (

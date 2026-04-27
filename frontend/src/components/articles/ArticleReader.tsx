@@ -288,7 +288,9 @@ export function ArticleReader({ articleId, tagLang }: Props) {
         {/* Article content */}
         <div className="flex justify-end mb-2">
           <button
-            onClick={() => extractContent.mutate(article.id)}
+            onClick={() => extractContent.mutate(article.id, {
+              onSuccess: () => { suggestTried.current = false; },
+            })}
             disabled={extractContent.isPending}
             className="text-xs text-gray-400 hover:text-blue-500 disabled:opacity-50"
             title="Re-fetch article content"
