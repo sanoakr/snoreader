@@ -14,9 +14,10 @@ export function useUpdateArticle() {
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: { is_read?: boolean; is_saved?: boolean } }) =>
       api.updateArticle(id, data),
-    onSuccess: () => {
+    onSuccess: (_result, { id }) => {
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['feeds'] });
+      qc.invalidateQueries({ queryKey: ['article', id] });
     },
   });
 }

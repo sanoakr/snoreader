@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
-import { useTags } from '../../hooks/useTags';
+import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
 
@@ -18,8 +18,14 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
   const refreshFeed = useRefreshFeed();
   const importOpml = useImportOpml();
   const importArticles = useImportArticles();
+  const renameTag = useRenameTag();
+  const bulkDeleteTags = useBulkDeleteTags();
+  const aiTagSaved = useAiTagSaved();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [tagManageMode, setTagManageMode] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<number | null>(null);
+  const [editingTagName, setEditingTagName] = useState('');
   const opmlFileRef = useRef<HTMLInputElement>(null);
   const articlesFileRef = useRef<HTMLInputElement>(null);
 
@@ -43,6 +49,13 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
     const file = e.target.files?.[0];
     if (file) importArticles.mutate(file);
     e.target.value = '';
+  };
+
+  const handleRenameSubmit = (tagId: number) => {
+    if (!editingTagName.trim()) { setEditingTagId(null); return; }
+    renameTag.mutate({ id: tagId, name: editingTagName.trim() }, {
+      onSuccess: () => setEditingTagId(null),
+    });
   };
 
   return (
@@ -78,23 +91,95 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
           Saved
         </button>
 
-        {/* Tags */}
+        {/* Tags エリア */}
         {tags && tags.length > 0 && (
-          <div className="px-3 pt-0.5 pb-1 flex flex-wrap gap-1">
-            {tags.map((tag) => (
-              <button
-                key={tag.id}
-                onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: tag.id })}
-                className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
-                  filters.tag_id === tag.id
-                    ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
-                    : 'text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                #{tag.name}
-              </button>
-            ))}
-          </div>
+          <>
+            {/* タグ管理ヘッダー */}
+            <div className="flex items-center justify-between px-3 pt-1">
+              <span className="text-xs text-gray-400">Tags</span>
+              <div className="flex items-center gap-1">
+                {tagManageMode && (
+                  <button
+                    onClick={() => aiTagSaved.mutate()}
+                    disabled={aiTagSaved.isPending}
+                    className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
+                    title="AI tag all Saved articles"
+                  >
+                    {aiTagSaved.isPending ? 'AI...' : 'AI tag all'}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}
+                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
+                  title={tagManageMode ? 'Done' : 'Manage tags'}
+                >
+                  {tagManageMode ? 'Done' : '⚙'}
+                </button>
+              </div>
+            </div>
+
+            {tagManageMode ? (
+              /* 管理モード: 各タグに rename / delete アイコン */
+              <div className="px-3 pb-1 space-y-0.5">
+                {tags.map((tag) => (
+                  <div key={tag.id} className="flex items-center gap-1 group">
+                    {editingTagId === tag.id ? (
+                      <form
+                        className="flex-1 flex gap-1"
+                        onSubmit={(e) => { e.preventDefault(); handleRenameSubmit(tag.id); }}
+                      >
+                        <input
+                          type="text"
+                          value={editingTagName}
+                          onChange={(e) => setEditingTagName(e.target.value)}
+                          className="flex-1 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === 'Escape') setEditingTagId(null); }}
+                        />
+                        <button type="submit" className="text-xs text-blue-500 hover:text-blue-700">✓</button>
+                        <button type="button" onClick={() => setEditingTagId(null)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                      </form>
+                    ) : (
+                      <>
+                        <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">#{tag.name}</span>
+                        <button
+                          onClick={() => { setEditingTagId(tag.id); setEditingTagName(tag.name); }}
+                          className="text-gray-300 hover:text-blue-500 text-xs opacity-0 group-hover:opacity-100"
+                          title="Rename"
+                        >
+                          ✏
+                        </button>
+                        <button
+                          onClick={() => { if (confirm(`Delete tag "${tag.name}"?`)) bulkDeleteTags.mutate([tag.id]); }}
+                          className="text-gray-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100"
+                          title="Delete"
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* 通常モード: コンパクトチップ */
+              <div className="px-3 pt-0.5 pb-1 flex flex-wrap gap-1">
+                {tags.map((tag) => (
+                  <button
+                    key={tag.id}
+                    onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: tag.id })}
+                    className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
+                      filters.tag_id === tag.id
+                        ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    #{tag.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         <hr className="my-2 border-gray-200 dark:border-gray-700" />

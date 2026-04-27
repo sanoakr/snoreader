@@ -16,6 +16,14 @@ class TagCreate(BaseModel):
     name: str
 
 
+class TagUpdate(BaseModel):
+    name: str
+
+
+class BulkDeleteTagsRequest(BaseModel):
+    tag_ids: list[int]
+
+
 # --- Feed ---
 
 class FeedCreate(BaseModel):

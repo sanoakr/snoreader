@@ -88,6 +88,10 @@ export function getAiStatus(): Promise<{ available: boolean; base_url: string }>
   return fetchJSON(`${BASE}/ai/status`);
 }
 
+export function aiTagSaved(): Promise<{ queued: number }> {
+  return fetchJSON(`${BASE}/articles/ai-tag-saved`, { method: 'POST' });
+}
+
 // --- Search ---
 
 export function searchArticles(
@@ -108,6 +112,22 @@ export function searchArticles(
 
 export function getTags(): Promise<Tag[]> {
   return fetchJSON(`${BASE}/tags`);
+}
+
+export function renameTag(id: number, name: string): Promise<Tag> {
+  return fetchJSON(`${BASE}/tags/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function bulkDeleteTags(tag_ids: number[]): Promise<{ deleted: number }> {
+  return fetchJSON(`${BASE}/tags/bulk`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag_ids }),
+  });
 }
 
 export function addTagToArticle(articleId: number, name: string): Promise<Tag> {

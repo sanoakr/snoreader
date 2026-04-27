@@ -2,14 +2,14 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import Integer, case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database import get_session
-from app.models import Article, ArticleTag, Feed
+from app.models import Article, ArticleTag, Feed, Tag
 from app.schemas import (
     ArticleDetail,
     ArticleOut,
@@ -220,6 +220,50 @@ async def suggest_article_tags(
     if not tags:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
     return tags
+
+
+@router.post("/articles/ai-tag-saved", response_model=dict)
+async def ai_tag_saved_articles(
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+):
+    """Saved 済みでタグなしの記事に AI タグ提案を実行して自動付与する。"""
+    stmt = select(Article).where(Article.is_saved == True).options(selectinload(Article.tags))  # noqa: E712
+    result = await session.execute(stmt)
+    untagged_ids = [a.id for a in result.scalars() if not a.tags]
+    if untagged_ids:
+        background_tasks.add_task(_bulk_tag_job, untagged_ids)
+    return {"queued": len(untagged_ids)}
+
+
+async def _bulk_tag_job(article_ids: list[int]) -> None:
+    """Saved 記事に AI タグを一括付与するバックグラウンドタスク。"""
+    from app.ai.tagger import suggest_tags
+    from app.database import async_session
+
+    async with async_session() as session:
+        for article_id in article_ids:
+            article = await session.get(Article, article_id)
+            if not article:
+                continue
+            text = article.content or article.summary or ""
+            tags = await suggest_tags(article.title, text)
+            for tag_name in tags:
+                result = await session.execute(select(Tag).where(Tag.name == tag_name))
+                tag = result.scalar_one_or_none()
+                if not tag:
+                    tag = Tag(name=tag_name)
+                    session.add(tag)
+                    await session.flush()
+                dup = await session.execute(
+                    select(ArticleTag).where(
+                        ArticleTag.article_id == article_id,
+                        ArticleTag.tag_id == tag.id,
+                    )
+                )
+                if not dup.scalar_one_or_none():
+                    session.add(ArticleTag(article_id=article_id, tag_id=tag.id))
+            await session.commit()
 
 
 @router.get("/ai/status")

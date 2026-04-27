@@ -73,8 +73,22 @@ def _extract_from_bytes(content: bytes, url: str) -> str | None:
         include_tables=True,
         include_images=True,
         include_links=True,
+        include_formatting=True,
         output_format="html",
     )
+    # まとめサイト・掲示板系でコンテンツが取れない場合は網羅性優先で再試行
+    if not result:
+        result = trafilatura.extract(
+            tree,
+            url=url,
+            include_comments=False,
+            include_tables=True,
+            include_images=True,
+            include_links=True,
+            include_formatting=True,
+            favor_recall=True,
+            output_format="html",
+        )
     if result:
         result = _fix_html(result)
     return result

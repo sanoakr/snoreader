@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
 import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus } from '../../hooks/useArticles';
-import { useAddTag, useRemoveTag } from '../../hooks/useTags';
+import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
 
 interface Props {
   articleId: number;
@@ -10,6 +10,7 @@ interface Props {
 
 export function ArticleReader({ articleId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const summarizeTried = useRef(false);
   const { data: article, isLoading } = useQuery({
     queryKey: ['article', articleId],
     queryFn: () => getArticle(articleId),
@@ -20,20 +21,38 @@ export function ArticleReader({ articleId }: Props) {
   const addTag = useAddTag();
   const removeTag = useRemoveTag();
   const { data: aiStatus } = useAiStatus();
+  const { data: existingTags } = useTags();
   const [tagInput, setTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
   const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
 
+  const aiAvailable = aiStatus?.available ?? false;
+
+  // 記事が変わったら summarize 試行フラグをリセット
+  useEffect(() => {
+    summarizeTried.current = false;
+    setSuggestedTags([]);
+  }, [articleId]);
+
+  // 記事を開いたら自動で既読にする
   useEffect(() => {
     if (article && !article.is_read) {
       updateArticle.mutate({ id: article.id, data: { is_read: true } });
     }
   }, [article?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // スクロール位置をリセット
   useEffect(() => {
     containerRef.current?.scrollTo(0, 0);
-    setSuggestedTags([]);
   }, [articleId]);
+
+  // AI 要約を自動生成（ai_summary がなければ）
+  useEffect(() => {
+    if (article && !article.ai_summary && aiAvailable && !summarizeTried.current) {
+      summarizeTried.current = true;
+      summarizeArticle.mutate(article.id);
+    }
+  }, [article?.id, aiAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return <div className="p-6 text-gray-400">Loading...</div>;
@@ -59,7 +78,17 @@ export function ArticleReader({ articleId }: Props) {
 
   const handleSuggestTags = () => {
     suggestTags.mutate(article.id, {
-      onSuccess: (tags) => setSuggestedTags(tags),
+      onSuccess: (tags) => {
+        const existing = existingTags ?? [];
+        const autoAdd = tags.filter(t =>
+          existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+        );
+        const manual = tags.filter(t =>
+          !existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+        );
+        autoAdd.forEach(name => addTag.mutate({ articleId: article.id, name }));
+        setSuggestedTags(manual);
+      },
     });
   };
 
@@ -68,7 +97,31 @@ export function ArticleReader({ articleId }: Props) {
     setSuggestedTags(prev => prev.filter(t => t !== name));
   };
 
-  const aiAvailable = aiStatus?.available ?? false;
+  const handleSaveToggle = () => {
+    const willBeSaved = !article.is_saved;
+    updateArticle.mutate(
+      { id: article.id, data: { is_saved: willBeSaved } },
+      {
+        onSuccess: () => {
+          if (willBeSaved && aiAvailable && !suggestedTags.length) {
+            suggestTags.mutate(article.id, {
+              onSuccess: (tags) => {
+                const existing = existingTags ?? [];
+                const autoAdd = tags.filter(t =>
+                  existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+                );
+                const manual = tags.filter(t =>
+                  !existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+                );
+                autoAdd.forEach(name => addTag.mutate({ articleId: article.id, name }));
+                setSuggestedTags(manual);
+              },
+            });
+          }
+        },
+      }
+    );
+  };
 
   return (
     <div ref={containerRef} className="h-screen overflow-y-auto">
@@ -91,22 +144,9 @@ export function ArticleReader({ articleId }: Props) {
           </div>
           <div className="mt-3">
             <button
-              onClick={() => {
-                const willBeSaved = !article.is_saved;
-                updateArticle.mutate(
-                  { id: article.id, data: { is_saved: willBeSaved } },
-                  {
-                    onSuccess: () => {
-                      if (willBeSaved && aiAvailable && !suggestedTags.length) {
-                        suggestTags.mutate(article.id, {
-                          onSuccess: (tags) => setSuggestedTags(tags),
-                        });
-                      }
-                    },
-                  }
-                );
-              }}
-              className={`text-sm ${article.is_saved ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
+              onClick={handleSaveToggle}
+              disabled={updateArticle.isPending}
+              className={`text-sm disabled:opacity-50 ${article.is_saved ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
             >
               {article.is_saved ? '★ Saved' : '☆ Save'}
             </button>
@@ -187,22 +227,28 @@ export function ArticleReader({ articleId }: Props) {
           )}
 
           {/* AI Summary */}
-          {article.ai_summary && (
+          {article.ai_summary ? (
             <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded text-sm text-gray-700 dark:text-gray-300">
               <span className="text-xs font-medium text-purple-500 block mb-1">AI Summary</span>
               {article.ai_summary}
             </div>
-          )}
-          {aiAvailable && !article.ai_summary && (
-            <button
-              onClick={() => summarizeArticle.mutate(article.id)}
-              disabled={summarizeArticle.isPending}
-              className="mt-3 text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-            >
-              {summarizeArticle.isPending ? 'Summarizing...' : 'AI summarize'}
-            </button>
-          )}
+          ) : summarizeArticle.isPending ? (
+            <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded text-sm text-gray-400">
+              <span className="text-xs font-medium text-purple-400 block mb-1">AI Summary</span>
+              Summarizing...
+            </div>
+          ) : null}
         </header>
+
+        {/* アイキャッチ画像 */}
+        {article.image_url && (
+          <img
+            src={article.image_url}
+            alt=""
+            className="w-full max-h-72 object-cover rounded-lg mb-4"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
 
         {/* Article content */}
         {article.content ? (

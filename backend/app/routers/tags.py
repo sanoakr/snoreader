@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Article, ArticleTag, Tag
-from app.schemas import TagCreate, TagOut
+from app.schemas import BulkDeleteTagsRequest, TagCreate, TagOut, TagUpdate
 
 router = APIRouter(tags=["tags"])
 
@@ -27,6 +27,30 @@ async def create_tag(body: TagCreate, session: AsyncSession = Depends(get_sessio
     await session.commit()
     await session.refresh(tag)
     return TagOut.model_validate(tag)
+
+
+@router.patch("/tags/{tag_id}", response_model=TagOut)
+async def rename_tag(tag_id: int, body: TagUpdate, session: AsyncSession = Depends(get_session)):
+    tag = await session.get(Tag, tag_id)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    dup = await session.execute(select(Tag).where(Tag.name == body.name, Tag.id != tag_id))
+    if dup.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Tag name already exists")
+    tag.name = body.name
+    await session.commit()
+    await session.refresh(tag)
+    return TagOut.model_validate(tag)
+
+
+@router.delete("/tags/bulk", response_model=dict)
+async def bulk_delete_tags(body: BulkDeleteTagsRequest, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Tag).where(Tag.id.in_(body.tag_ids)))
+    tags_to_delete = result.scalars().all()
+    for tag in tags_to_delete:
+        await session.delete(tag)
+    await session.commit()
+    return {"deleted": len(tags_to_delete)}
 
 
 @router.delete("/tags/{tag_id}", status_code=204)

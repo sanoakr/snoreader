@@ -31,3 +31,39 @@ export function useRemoveTag() {
     },
   });
 }
+
+export function useRenameTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => api.renameTag(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tags'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      qc.invalidateQueries({ queryKey: ['article'] });
+    },
+  });
+}
+
+export function useBulkDeleteTags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (tag_ids: number[]) => api.bulkDeleteTags(tag_ids),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tags'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      qc.invalidateQueries({ queryKey: ['article'] });
+    },
+  });
+}
+
+export function useAiTagSaved() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.aiTagSaved,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tags'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      qc.invalidateQueries({ queryKey: ['article'] });
+    },
+  });
+}
