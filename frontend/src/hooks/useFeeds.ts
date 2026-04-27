@@ -5,6 +5,7 @@ export function useFeeds() {
   return useQuery({
     queryKey: ['feeds'],
     queryFn: api.getFeeds,
+    refetchInterval: 60_000,
   });
 }
 

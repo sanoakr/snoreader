@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useArticles, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
+import { useAiStatus, useArticles, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
 import type { Article, ArticleFilters } from '../../types';
 import { ArticleCard } from './ArticleCard';
@@ -30,6 +30,8 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
   const searchResults = useSearchArticles(searchQuery, { feed_id: filters.feed_id, is_saved: filters.is_saved });
   const markAllRead = useMarkAllRead();
   const updateArticle = useUpdateArticle();
+  const { data: aiStatus } = useAiStatus();
+  const aiAvailable = aiStatus?.available ?? false;
   const { data: tags } = useTags();
   const bulkDeleteTags = useBulkDeleteTags();
 
@@ -223,6 +225,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
             <ArticleReader
               articleId={selectedId}
               tagLang={tagLang}
+              aiAvailable={aiAvailable}
               onPrev={hasPrev ? () => goPrev(currentIndex) : undefined}
               onNext={hasNext ? () => goNext(currentIndex) : undefined}
             />

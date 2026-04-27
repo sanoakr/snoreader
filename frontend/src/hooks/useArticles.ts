@@ -13,6 +13,7 @@ export function useArticles(filters: ArticleFilters) {
       const loaded = allPages.reduce((s, p) => s + p.items.length, 0);
       return loaded < lastPage.total ? loaded : undefined;
     },
+    refetchInterval: 60_000,
   });
 }
 

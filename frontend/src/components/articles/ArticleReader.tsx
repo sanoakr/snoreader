@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
-import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus, useExtractContent } from '../../hooks/useArticles';
+import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useExtractContent } from '../../hooks/useArticles';
 import { Spinner } from '../common/Spinner';
 import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
 import type { TagSuggestion } from '../../types';
@@ -9,11 +9,12 @@ import type { TagSuggestion } from '../../types';
 interface Props {
   articleId: number;
   tagLang: 'en' | 'ja';
+  aiAvailable: boolean;
   onPrev?: () => void;
   onNext?: () => void;
 }
 
-export function ArticleReader({ articleId, tagLang, onPrev, onNext }: Props) {
+export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -29,13 +30,10 @@ export function ArticleReader({ articleId, tagLang, onPrev, onNext }: Props) {
   const suggestTags = useSuggestTags();
   const addTag = useAddTag();
   const removeTag = useRemoveTag();
-  const { data: aiStatus } = useAiStatus();
   const { data: existingTags } = useTags();
   const [tagInput, setTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
   const [suggestedTags, setSuggestedTags] = useState<TagSuggestion[]>([]);
-
-  const aiAvailable = aiStatus?.available ?? false;
 
   // Reset attempt flags when article changes
   useEffect(() => {
