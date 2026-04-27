@@ -53,30 +53,46 @@ _TRANSLATE_SYSTEM = (
 )
 
 
-async def translate_tags(names: list[str]) -> dict[str, str]:
-    """Translate English tag names to Japanese using LLM.
+_STATIC_JA: dict[str, str] = {
+    "ai": "AI", "automation": "自動化", "code": "コード", "coding": "コーディング",
+    "security": "セキュリティ", "programming": "プログラミング", "education": "教育",
+    "free": "無料", "japan": "日本", "japanese": "日本語", "terminal": "ターミナル",
+    "troubleshooting": "トラブルシューティング", "devtools": "開発ツール",
+    "llmvision": "LLMビジョン", "politics": "政治", "science": "科学",
+    "health": "健康", "technology": "技術", "business": "ビジネス",
+    "research": "研究", "news": "ニュース", "society": "社会",
+    "environment": "環境", "economics": "経済", "culture": "文化",
+}
 
-    Returns dict of {en_name: ja_name}. Missing entries if LLM unavailable.
+
+async def translate_tags(names: list[str]) -> dict[str, str]:
+    """Translate English tag names to Japanese using LLM with static fallback.
+
+    Returns dict of {en_name: ja_name}.
     """
     if not names:
         return {}
+    # 静的マッピングで賄えるものは先に解決
+    out = {n: _STATIC_JA[n] for n in names if n in _STATIC_JA}
+    remaining = [n for n in names if n not in out]
+    if not remaining:
+        return out
+
     messages = [
         {"role": "system", "content": _TRANSLATE_SYSTEM},
-        {"role": "user", "content": "\n".join(names)},
+        {"role": "user", "content": "\n".join(remaining)},
     ]
-    max_tokens = min(len(names) * 20, 400)
+    max_tokens = min(len(remaining) * 20, 400)
     result = await chat_completion(messages, max_tokens=max_tokens, temperature=0.1)
-    if not result:
-        return {}
-    out: dict[str, str] = {}
-    for line in result.splitlines():
-        line = line.strip()
-        if "=" in line:
-            en, ja = line.split("=", 1)
-            en = en.strip().lower()
-            ja = ja.strip()
-            if en and ja and en in names:
-                out[en] = ja
+    if result:
+        for line in result.splitlines():
+            line = line.strip()
+            if "=" in line:
+                en, ja = line.split("=", 1)
+                en = en.strip().lower()
+                ja = ja.strip()
+                if en and ja and en in remaining:
+                    out[en] = ja
     return out
 
 
