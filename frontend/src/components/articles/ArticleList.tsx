@@ -142,9 +142,19 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
             className="w-full px-2 py-1.5 text-sm border rounded dark:bg-gray-800 dark:border-gray-600"
           />
           <div className="flex items-center gap-1.5 flex-wrap">
-            <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
-            <button onClick={() => onFilterChange({ ...filters, is_read: false })} className={filterBtnClass(filters.is_read === false)}>Unread</button>
-            <button onClick={() => onFilterChange({ ...filters, is_read: true })} className={filterBtnClass(filters.is_read === true)}>Read</button>
+            {!filters.recommended && (
+              <>
+                <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
+                <button onClick={() => onFilterChange({ ...filters, is_read: false })} className={filterBtnClass(filters.is_read === false)}>Unread</button>
+                <button onClick={() => onFilterChange({ ...filters, is_read: true })} className={filterBtnClass(filters.is_read === true)}>Read</button>
+              </>
+            )}
+            {filters.recommended && (
+              <>
+                <button onClick={() => onFilterChange({ ...filters, sort: undefined, order: undefined })} className={filterBtnClass(!filters.sort || filters.sort === 'score')}>Score</button>
+                <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'desc' })} className={filterBtnClass(filters.sort === 'date')}>Date</button>
+              </>
+            )}
             <div className="flex-1" />
             <span className="text-xs text-gray-400">{total}</span>
             {selectedTag ? (

@@ -69,6 +69,75 @@ async def list_articles(
     return PaginatedArticles(items=items, total=total, offset=offset, limit=limit)
 
 
+@router.get("/articles/recommended", response_model=PaginatedArticles)
+async def get_recommended_articles(
+    sort: str = Query("score", pattern="^(score|date)$"),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return unread articles ranked by tag frequency overlap with saved articles."""
+    import json as _json
+
+    # Tag frequency map from saved articles: {tag_name: count}
+    freq_stmt = (
+        select(Tag.name, func.count(ArticleTag.article_id).label("freq"))
+        .join(ArticleTag, Tag.id == ArticleTag.tag_id)
+        .join(Article, ArticleTag.article_id == Article.id)
+        .where(Article.is_saved == True)  # noqa: E712
+        .group_by(Tag.name)
+    )
+    tag_freq: dict[str, int] = {
+        row[0]: row[1] for row in (await session.execute(freq_stmt))
+    }
+    if not tag_freq:
+        return PaginatedArticles(items=[], total=0, offset=offset, limit=limit)
+
+    # Unread unsaved articles with pre-computed tag suggestions
+    stmt = (
+        select(Article, Feed.title.label("feed_title"))
+        .join(Feed)
+        .where(
+            Article.is_read == False,  # noqa: E712
+            Article.is_saved == False,  # noqa: E712
+            Article.tag_suggestions.isnot(None),
+        )
+    )
+    rows = (await session.execute(stmt)).all()
+
+    # Frequency-weighted score
+    scored: list[tuple[int, Article, str]] = []
+    for row in rows:
+        article, feed_title = row[0], row[1]
+        suggestions = set(_json.loads(article.tag_suggestions))
+        score = sum(tag_freq.get(t, 0) for t in suggestions if t in tag_freq)
+        if score > 0:
+            scored.append((score, article, feed_title))
+
+    def _pub_ts(a: Article) -> float:
+        try:
+            return datetime.fromisoformat(a.published_at).timestamp() if a.published_at else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    if sort == "score":
+        scored.sort(key=lambda x: (-x[0] if order == "desc" else x[0], -_pub_ts(x[1])))
+    else:
+        scored.sort(key=lambda x: (-_pub_ts(x[1]) if order == "desc" else _pub_ts(x[1])))
+
+    total = len(scored)
+    page = scored[offset: offset + limit]
+
+    items = []
+    for score, article, feed_title in page:
+        out = ArticleOut.model_validate(article)
+        out.feed_title = feed_title
+        out.rec_score = score
+        items.append(out)
+    return PaginatedArticles(items=items, total=total, offset=offset, limit=limit)
+
+
 @router.get("/articles/{article_id}", response_model=ArticleDetail)
 async def get_article(article_id: int, session: AsyncSession = Depends(get_session)):
     article = await session.get(Article, article_id)

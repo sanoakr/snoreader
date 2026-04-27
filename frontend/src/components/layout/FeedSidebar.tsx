@@ -69,9 +69,19 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
       </div>
 
       <nav className="flex-1 p-2 space-y-0.5">
+        {/* Recommended */}
+        <button
+          onClick={() => onFilterChange({ recommended: true })}
+          className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-gray-200 dark:hover:bg-gray-800 ${
+            filters.recommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+          }`}
+        >
+          ✦ Recommend
+        </button>
+
         {/* All articles */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined, recommended: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.feed_id == null && filters.is_saved == null && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
@@ -86,7 +96,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, tag_id: undefined })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, tag_id: undefined, recommended: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.is_saved === true && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
@@ -193,7 +203,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 {tags.map((tag) => (
                   <button
                     key={tag.id}
-                    onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: tag.id })}
+                    onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: tag.id, recommended: undefined })}
                     className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
                       filters.tag_id === tag.id
                         ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
@@ -215,7 +225,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         {feeds?.map((feed) => (
           <div key={feed.id} className="group flex items-center">
             <button
-              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined })}
+              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined, recommended: undefined })}
               className={`flex-1 text-left px-3 py-1.5 rounded text-sm truncate flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-800 ${
                 filters.feed_id === feed.id ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
               }`}

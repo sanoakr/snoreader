@@ -60,6 +60,7 @@ class Article(Base):
     saved_at: Mapped[str | None] = mapped_column(String)
     ai_summary: Mapped[str | None] = mapped_column(Text)
     ai_score: Mapped[float | None] = mapped_column(Float)
+    tag_suggestions: Mapped[str | None] = mapped_column(String, nullable=True)
 
     feed: Mapped["Feed"] = relationship(back_populates="articles")
     tags: Mapped[list["Tag"]] = relationship(secondary="article_tags", back_populates="articles")

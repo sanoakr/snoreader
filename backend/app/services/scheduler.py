@@ -20,7 +20,7 @@ async def _fetch_job():
 
 
 async def _summarize_job():
-    """未要約記事をバッチ処理する低優先度バックグラウンドジョブ。"""
+    """Low-priority background job: summarize articles and compute tag suggestions."""
     if _summarize_lock.locked():
         logger.debug("Summarize job skipped: previous run still active")
         return
@@ -30,13 +30,18 @@ async def _summarize_job():
         return
 
     async with _summarize_lock:
+        import json as _json
+
         from app.ai.summarizer import summarize_article
+        from app.ai.tagger import suggest_tags as _suggest_tags
         from app.database import async_session
-        from app.models import Article
+        from app.models import Article, Tag
 
         async with async_session() as session:
-            # Fetch unsummarized articles ordered by priority: Saved > Unread > Read
-            stmt = (
+            existing_names = list((await session.execute(select(Tag.name))).scalars())
+
+            # Phase 1: summarize unsummarized articles + compute tag suggestions
+            stmt1 = (
                 select(Article)
                 .where(Article.ai_summary.is_(None))
                 .order_by(
@@ -46,23 +51,41 @@ async def _summarize_job():
                 )
                 .limit(settings.summarize_batch_size)
             )
-            result = await session.execute(stmt)
-            articles = result.scalars().all()
-
-            if not articles:
-                return
-
-            logger.info("Background summarize: processing %d articles", len(articles))
+            articles = (await session.execute(stmt1)).scalars().all()
+            if articles:
+                logger.info("Background summarize (phase1): processing %d articles", len(articles))
             for article in articles:
                 try:
                     text = article.content or article.summary or ""
                     summary = await summarize_article(article.title, text)
                     if summary:
                         article.ai_summary = summary
+                        pairs = await _suggest_tags(article.title, summary, existing_tags=existing_names)
+                        if pairs:
+                            article.tag_suggestions = _json.dumps([en for en, _ in pairs])
                         await session.commit()
                         logger.debug("Summarized article %d: %s", article.id, article.title[:40])
                 except Exception as e:
                     logger.warning("Failed to summarize article %d: %s", article.id, e)
+
+            # Phase 2: backfill tag_suggestions for already-summarized articles
+            stmt2 = (
+                select(Article)
+                .where(Article.ai_summary.isnot(None), Article.tag_suggestions.is_(None))
+                .order_by(Article.is_saved.desc(), Article.published_at.desc())
+                .limit(settings.summarize_batch_size)
+            )
+            backfill = (await session.execute(stmt2)).scalars().all()
+            if backfill:
+                logger.info("Background summarize (phase2 backfill): processing %d articles", len(backfill))
+            for article in backfill:
+                try:
+                    pairs = await _suggest_tags(article.title, article.ai_summary, existing_tags=existing_names)
+                    if pairs:
+                        article.tag_suggestions = _json.dumps([en for en, _ in pairs])
+                        await session.commit()
+                except Exception as e:
+                    logger.warning("Failed to suggest tags for article %d: %s", article.id, e)
 
 
 def start_scheduler():

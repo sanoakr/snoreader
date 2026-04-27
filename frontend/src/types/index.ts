@@ -36,6 +36,7 @@ export interface Article {
   is_read: boolean;
   is_saved: boolean;
   feed_title: string | null;
+  rec_score?: number;
 }
 
 export interface ArticleDetail extends Article {
@@ -61,4 +62,5 @@ export interface ArticleFilters {
   tag_id?: number;
   sort?: string;
   order?: string;
+  recommended?: boolean;
 }
