@@ -224,18 +224,22 @@ async def suggest_article_tags(
     return tags
 
 
+_BULK_TAG_BATCH = 10  # 一度に処理する最大件数
+
+
 @router.post("/articles/ai-tag-saved", response_model=dict)
 async def ai_tag_saved_articles(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
-    """Saved 済みでタグなしの記事に AI タグ提案を実行して自動付与する。"""
+    """Saved 済みでタグなしの記事に AI タグ提案を実行して自動付与する（最大10件/回）。"""
     stmt = select(Article).where(Article.is_saved == True).options(selectinload(Article.tags))  # noqa: E712
     result = await session.execute(stmt)
     untagged_ids = [a.id for a in result.scalars() if not a.tags]
-    if untagged_ids:
-        background_tasks.add_task(_bulk_tag_job, untagged_ids)
-    return {"queued": len(untagged_ids)}
+    batch = untagged_ids[:_BULK_TAG_BATCH]
+    if batch:
+        background_tasks.add_task(_bulk_tag_job, batch)
+    return {"queued": len(batch), "remaining": len(untagged_ids) - len(batch)}
 
 
 async def _bulk_tag_job(article_ids: list[int]) -> None:

@@ -88,7 +88,7 @@ export function getAiStatus(): Promise<{ available: boolean; base_url: string }>
   return fetchJSON(`${BASE}/ai/status`);
 }
 
-export function aiTagSaved(): Promise<{ queued: number }> {
+export function aiTagSaved(): Promise<{ queued: number; remaining: number }> {
   return fetchJSON(`${BASE}/articles/ai-tag-saved`, { method: 'POST' });
 }
 

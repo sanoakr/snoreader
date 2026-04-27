@@ -103,9 +103,9 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
                     onClick={() => aiTagSaved.mutate()}
                     disabled={aiTagSaved.isPending}
                     className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-                    title="AI tag all Saved articles"
+                    title="AI tag Saved articles (10 at a time)"
                   >
-                    {aiTagSaved.isPending ? 'AI...' : 'AI tag all'}
+                    {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
                   </button>
                 )}
                 <button
