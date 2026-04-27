@@ -84,7 +84,8 @@ export function useAiStatus() {
   return useQuery({
     queryKey: ['ai-status'],
     queryFn: api.getAiStatus,
-    staleTime: 60_000,
+    staleTime: 10_000,
+    refetchInterval: (query) => (query.state.data?.running ? 10_000 : 30_000),
   });
 }
 
