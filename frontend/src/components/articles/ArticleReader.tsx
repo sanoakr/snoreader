@@ -184,7 +184,7 @@ export function ArticleReader({ articleId, tagLang, onPrev, onNext }: Props) {
   };
 
   return (
-    <div ref={containerRef} className="h-screen overflow-y-auto">
+    <div ref={containerRef} className="h-screen overflow-y-auto pt-12 md:pt-0">
       <article className="max-w-3xl mx-auto p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-2">
