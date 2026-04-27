@@ -1,6 +1,6 @@
 HOST ?= $(shell cat .host 2>/dev/null)
 
-.PHONY: dev backend frontend build cert prod
+.PHONY: dev backend frontend build cert prod deploy
 
 dev:
 	@echo "Starting backend and frontend..."
@@ -14,6 +14,12 @@ frontend:
 
 build:
 	cd frontend && npm run build
+
+deploy:
+	$(MAKE) build
+	launchctl unload ~/Library/LaunchAgents/com.ccxa.snoreader.plist
+	launchctl load ~/Library/LaunchAgents/com.ccxa.snoreader.plist
+	@echo "Deployed."
 
 cert:
 	@test -n "$(HOST)" || { echo "Usage: make cert HOST=your-host.ts.net"; exit 1; }
