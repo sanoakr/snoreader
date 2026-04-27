@@ -113,6 +113,10 @@ async def _summarize_job():
                     logger.warning("Failed to suggest tags (phase3) for article %d: %s", article.id, e)
 
 
+def summarize_job_running() -> bool:
+    return _summarize_lock.locked()
+
+
 def start_scheduler():
     global _scheduler
     _scheduler = AsyncIOScheduler()

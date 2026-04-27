@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
-import { useRecommendedCount, useSavedCount } from '../../hooks/useArticles';
+import { useRecommendedCount, useSavedCount, useAiStatus } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
@@ -37,6 +37,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const totalUnread = feeds?.reduce((s, f) => s + f.unread_count, 0) ?? 0;
   const { data: recommendedCount } = useRecommendedCount();
   const { data: savedCount } = useSavedCount();
+  const { data: aiStatus } = useAiStatus();
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -360,6 +361,17 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         )}
         <input ref={opmlFileRef} type="file" accept=".opml,.xml" onChange={handleOpmlImport} className="hidden" />
         <input ref={articlesFileRef} type="file" accept=".json" onChange={handleArticlesImport} className="hidden" />
+        {aiStatus && (aiStatus.running || aiStatus.pending_summary > 0 || aiStatus.pending_tags > 0) && (
+          <div className="mt-2 px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+            {aiStatus.running && <Spinner size="sm" />}
+            <span>
+              {aiStatus.running ? 'AI処理中' : 'AI待機中'}{' — '}
+              {aiStatus.pending_summary > 0 && `要約 ${aiStatus.pending_summary}件`}
+              {aiStatus.pending_summary > 0 && aiStatus.pending_tags > 0 && ' / '}
+              {aiStatus.pending_tags > 0 && `タグ ${aiStatus.pending_tags}件`}
+            </span>
+          </div>
+        )}
       </div>
     </aside>
   );

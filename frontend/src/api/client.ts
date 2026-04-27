@@ -94,7 +94,15 @@ export function suggestTags(id: number): Promise<TagSuggestion[]> {
   return fetchJSON(`${BASE}/articles/${id}/suggest-tags`, { method: 'POST' });
 }
 
-export function getAiStatus(): Promise<{ available: boolean; base_url: string }> {
+export interface AiStatus {
+  available: boolean;
+  base_url: string;
+  running: boolean;
+  pending_summary: number;
+  pending_tags: number;
+}
+
+export function getAiStatus(): Promise<AiStatus> {
   return fetchJSON(`${BASE}/ai/status`);
 }
 

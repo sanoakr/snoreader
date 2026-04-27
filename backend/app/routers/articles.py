@@ -357,12 +357,27 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
 
 
 @router.get("/ai/status")
-async def ai_status():
-    """Check if the LLM server is available."""
+async def ai_status(session: AsyncSession = Depends(get_session)):
+    """Check LLM availability and background summarization queue depth."""
     from app.ai.llm_client import is_available
+    from app.services.scheduler import summarize_job_running
 
     available = await is_available()
-    return {"available": available, "base_url": settings.llm_base_url}
+    pending_summary = await session.scalar(
+        select(func.count()).select_from(Article).where(Article.ai_summary.is_(None))
+    )
+    pending_tags = await session.scalar(
+        select(func.count()).select_from(Article).where(
+            Article.ai_summary.isnot(None), Article.tag_suggestions.is_(None)
+        )
+    )
+    return {
+        "available": available,
+        "base_url": settings.llm_base_url,
+        "running": summarize_job_running(),
+        "pending_summary": pending_summary,
+        "pending_tags": pending_tags,
+    }
 
 
 @router.get("/search", response_model=PaginatedArticles)
