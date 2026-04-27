@@ -44,6 +44,16 @@ export function useSummarizeArticle() {
   });
 }
 
+export function useExtractContent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.extractArticleContent(id),
+    onSuccess: (data) => {
+      qc.setQueryData(['article', data.id], data);
+    },
+  });
+}
+
 export function useSuggestTags() {
   return useMutation({
     mutationFn: (id: number) => api.suggestTags(id),

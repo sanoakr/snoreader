@@ -80,6 +80,10 @@ export function summarizeArticle(id: number): Promise<ArticleDetail> {
   return fetchJSON(`${BASE}/articles/${id}/summarize`, { method: 'POST' });
 }
 
+export function extractArticleContent(id: number): Promise<ArticleDetail> {
+  return fetchJSON(`${BASE}/articles/${id}/extract`, { method: 'POST' });
+}
+
 export function suggestTags(id: number): Promise<TagSuggestion[]> {
   return fetchJSON(`${BASE}/articles/${id}/suggest-tags`, { method: 'POST' });
 }
@@ -90,6 +94,10 @@ export function getAiStatus(): Promise<{ available: boolean; base_url: string }>
 
 export function aiTagSaved(): Promise<{ queued: number; remaining: number }> {
   return fetchJSON(`${BASE}/articles/ai-tag-saved`, { method: 'POST' });
+}
+
+export function fillTagTranslations(): Promise<{ translating?: number; translated?: number }> {
+  return fetchJSON(`${BASE}/tags/fill-translations`, { method: 'POST' });
 }
 
 // --- Search ---

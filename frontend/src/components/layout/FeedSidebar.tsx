@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
-import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved } from '../../hooks/useTags';
+import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
 
@@ -23,6 +23,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const renameTag = useRenameTag();
   const bulkDeleteTags = useBulkDeleteTags();
   const aiTagSaved = useAiTagSaved();
+  const fillTranslations = useFillTagTranslations();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [tagManageMode, setTagManageMode] = useState(false);
@@ -102,22 +103,34 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 <span className="text-xs text-gray-400">Tags</span>
                 <button
                   onClick={onToggleTagLang}
-                  className="text-[10px] px-1 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
+                  className="flex items-center text-[10px] gap-0.5 px-1 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:border-gray-400 leading-none"
                   title="Toggle tag language"
                 >
-                  {tagLang === 'en' ? 'EN' : 'JA'}
+                  <span className={tagLang === 'en' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>EN</span>
+                  <span className="text-gray-300 dark:text-gray-600">|</span>
+                  <span className={tagLang === 'ja' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>JA</span>
                 </button>
               </div>
               <div className="flex items-center gap-1">
                 {tagManageMode && (
-                  <button
-                    onClick={() => aiTagSaved.mutate()}
-                    disabled={aiTagSaved.isPending}
-                    className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-                    title="AI tag Saved articles (10 at a time)"
-                  >
-                    {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => fillTranslations.mutate()}
+                      disabled={fillTranslations.isPending}
+                      className="text-xs text-blue-400 hover:text-blue-600 disabled:opacity-50"
+                      title="Translate English tags to Japanese"
+                    >
+                      {fillTranslations.isPending ? 'Translating...' : fillTranslations.isSuccess ? 'Done' : 'JA補完'}
+                    </button>
+                    <button
+                      onClick={() => aiTagSaved.mutate()}
+                      disabled={aiTagSaved.isPending}
+                      className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
+                      title="AI tag Saved articles (10 at a time)"
+                    >
+                      {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}

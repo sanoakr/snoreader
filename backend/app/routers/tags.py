@@ -1,6 +1,6 @@
 """Tag CRUD and article-tag management endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +9,37 @@ from app.models import Article, ArticleTag, Tag
 from app.schemas import BulkDeleteTagsRequest, TagCreate, TagOut, TagSuggestion, TagUpdate
 
 router = APIRouter(tags=["tags"])
+
+
+@router.post("/tags/fill-translations", response_model=dict)
+async def fill_tag_translations(
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+):
+    """name_ja が未設定の英語タグを LLM で一括翻訳する。"""
+    result = await session.execute(select(Tag).where(Tag.name_ja.is_(None)))
+    missing = [t for t in result.scalars() if t.name.isascii()]
+    if not missing:
+        return {"translated": 0}
+    names = [t.name for t in missing]
+    background_tasks.add_task(_fill_translations_job, names)
+    return {"translating": len(names)}
+
+
+async def _fill_translations_job(names: list[str]) -> None:
+    from app.ai.tagger import translate_tags
+    from app.database import async_session
+
+    mapping = await translate_tags(names)
+    if not mapping:
+        return
+    async with async_session() as session:
+        for name, ja in mapping.items():
+            result = await session.execute(select(Tag).where(Tag.name == name))
+            tag = result.scalar_one_or_none()
+            if tag:
+                tag.name_ja = ja
+        await session.commit()
 
 
 @router.get("/tags", response_model=list[TagOut])

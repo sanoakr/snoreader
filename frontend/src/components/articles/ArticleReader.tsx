@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
-import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus } from '../../hooks/useArticles';
+import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus, useExtractContent } from '../../hooks/useArticles';
 import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
 import type { TagSuggestion } from '../../types';
 
@@ -19,6 +19,7 @@ export function ArticleReader({ articleId, tagLang }: Props) {
   });
   const updateArticle = useUpdateArticle();
   const summarizeArticle = useSummarizeArticle();
+  const extractContent = useExtractContent();
   const suggestTags = useSuggestTags();
   const addTag = useAddTag();
   const removeTag = useRemoveTag();
@@ -254,6 +255,16 @@ export function ArticleReader({ articleId, tagLang }: Props) {
         )}
 
         {/* Article content */}
+        <div className="flex justify-end mb-2">
+          <button
+            onClick={() => extractContent.mutate(article.id)}
+            disabled={extractContent.isPending}
+            className="text-xs text-gray-400 hover:text-blue-500 disabled:opacity-50"
+            title="Re-fetch article content"
+          >
+            {extractContent.isPending ? '取得中...' : '↺ 本文再取得'}
+          </button>
+        </div>
         {article.content ? (
           <div
             className="prose dark:prose-invert max-w-none"

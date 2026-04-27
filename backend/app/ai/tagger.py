@@ -42,6 +42,44 @@ def _parse_tag_pairs(raw: str) -> list[tuple[str, str | None]]:
     return pairs[:3]
 
 
+_TRANSLATE_SYSTEM = (
+    "Translate English tech tags to Japanese. "
+    "Rules:\n"
+    "- Use katakana for foreign loanwords (e.g. coding→コーディング, security→セキュリティ)\n"
+    "- Keep proper nouns as-is or in katakana (Python→Python, GitHub→GitHub, AI→AI)\n"
+    "- Use common Japanese tech terms when they exist (programming→プログラミング)\n"
+    "- Format: english=日本語 per line\n"
+    "Return ONLY the translation pairs, one per line, nothing else."
+)
+
+
+async def translate_tags(names: list[str]) -> dict[str, str]:
+    """Translate English tag names to Japanese using LLM.
+
+    Returns dict of {en_name: ja_name}. Missing entries if LLM unavailable.
+    """
+    if not names:
+        return {}
+    messages = [
+        {"role": "system", "content": _TRANSLATE_SYSTEM},
+        {"role": "user", "content": "\n".join(names)},
+    ]
+    max_tokens = min(len(names) * 20, 400)
+    result = await chat_completion(messages, max_tokens=max_tokens, temperature=0.1)
+    if not result:
+        return {}
+    out: dict[str, str] = {}
+    for line in result.splitlines():
+        line = line.strip()
+        if "=" in line:
+            en, ja = line.split("=", 1)
+            en = en.strip().lower()
+            ja = ja.strip()
+            if en and ja and en in names:
+                out[en] = ja
+    return out
+
+
 async def suggest_tags(
     title: str,
     text: str,

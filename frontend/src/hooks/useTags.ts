@@ -67,3 +67,14 @@ export function useAiTagSaved() {
     },
   });
 }
+
+export function useFillTagTranslations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.fillTagTranslations,
+    onSuccess: () => {
+      // バックグラウンドで翻訳中なので2秒後にキャッシュ更新
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['tags'] }), 2000);
+    },
+  });
+}
