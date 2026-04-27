@@ -1,6 +1,6 @@
 # SnoReader
 
-A self-hosted RSS reader — access from multiple devices on your LAN or Tailnet via browser.
+A self-hosted RSS reader — access from multiple devices on your LAN via browser.
 
 ## Features
 
