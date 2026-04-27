@@ -152,4 +152,4 @@ snoreader/
 
 ## ライセンス
 
-Private
+[MIT](LICENSE)
