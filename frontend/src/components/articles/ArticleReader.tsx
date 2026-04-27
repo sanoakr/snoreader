@@ -31,25 +31,25 @@ export function ArticleReader({ articleId, tagLang }: Props) {
 
   const aiAvailable = aiStatus?.available ?? false;
 
-  // 記事が変わったら summarize 試行フラグをリセット
+  // Reset summarize attempt flag when article changes
   useEffect(() => {
     summarizeTried.current = false;
     setSuggestedTags([]);
   }, [articleId]);
 
-  // 記事を開いたら自動で既読にする
+  // Auto-mark as read when article is opened
   useEffect(() => {
     if (article && !article.is_read) {
       updateArticle.mutate({ id: article.id, data: { is_read: true } });
     }
   }, [article?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // スクロール位置をリセット
+  // Reset scroll position on article change
   useEffect(() => {
     containerRef.current?.scrollTo(0, 0);
   }, [articleId]);
 
-  // AI 要約を自動生成（ai_summary がなければ）
+  // Auto-generate AI summary if not yet available
   useEffect(() => {
     if (article && !article.ai_summary && aiAvailable && !summarizeTried.current) {
       summarizeTried.current = true;
@@ -159,7 +159,7 @@ export function ArticleReader({ articleId, tagLang }: Props) {
             </button>
           </div>
 
-          {/* Tags — Saved 記事のみ表示 */}
+          {/* Tags — only shown for saved articles */}
           {article.is_saved && (
             <>
               <div className="mt-3 flex items-center gap-1.5 flex-wrap">
@@ -251,7 +251,7 @@ export function ArticleReader({ articleId, tagLang }: Props) {
           ) : null}
         </header>
 
-        {/* アイキャッチ画像 */}
+        {/* Hero image */}
         {article.image_url && (
           <img
             src={article.image_url}

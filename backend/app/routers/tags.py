@@ -16,7 +16,7 @@ async def fill_tag_translations(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
-    """name_ja が未設定の英語タグを LLM で一括翻訳する。"""
+    """Batch-translate English tags with missing name_ja using LLM."""
     result = await session.execute(select(Tag).where(Tag.name_ja.is_(None)))
     missing = [t for t in result.scalars() if t.name.isascii()]
     if not missing:
@@ -107,11 +107,11 @@ async def add_tag_to_article(
     input_name = body.name.strip()
 
     if input_name.isascii():
-        # 英語入力: name に格納、name_ja は後でバックグラウンド補完
+        # English input: store as name; name_ja will be filled in background
         en_name = input_name.lower()
         ja_name = body.name_ja
     else:
-        # 日本語入力: LLM で英語名を生成して name に格納
+        # Japanese input: generate English name via LLM and store as name
         from app.ai.tagger import translate_to_english
         ja_name = input_name
         en_name = await translate_to_english(input_name)
@@ -138,7 +138,7 @@ async def add_tag_to_article(
 
     await session.commit()
 
-    # 英語タグで name_ja 未設定の場合はバックグラウンドで翻訳
+    # Schedule background translation for English tags without name_ja
     if tag.name_ja is None:
         background_tasks.add_task(_translate_single_tag, tag.id)
 
@@ -146,7 +146,7 @@ async def add_tag_to_article(
 
 
 async def _translate_single_tag(tag_id: int) -> None:
-    """新規英語タグの name_ja をバックグラウンドで LLM 翻訳する。"""
+    """Translate name_ja of a newly created English tag in the background."""
     from app.ai.tagger import translate_tags
     from app.database import async_session
 

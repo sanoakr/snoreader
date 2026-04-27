@@ -73,7 +73,7 @@ export function useFillTagTranslations() {
   return useMutation({
     mutationFn: api.fillTagTranslations,
     onSuccess: () => {
-      // バックグラウンドで翻訳中なので2秒後にキャッシュ更新
+      // Translation runs in background; refresh cache after 2 seconds
       setTimeout(() => qc.invalidateQueries({ queryKey: ['tags'] }), 2000);
     },
   });

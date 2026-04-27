@@ -48,7 +48,7 @@ def _fix_html(html: str, base_url: str = "") -> str:
     html = _GRAPHIC_RE.sub(_graphic_to_img, html)
     html = _NESTED_PRE.sub(r'<pre>\1</pre>', html)
 
-    # 相対 img src を絶対 URL に変換 + hotlink 対策で referrerpolicy 追加
+    # Absolutize relative img src and add referrerpolicy for hotlink protection
     def _fix_img_tag(m: re.Match) -> str:
         tag = m.group(0)
         def _abs_src(sm: re.Match) -> str:
@@ -94,7 +94,7 @@ def _extract_from_bytes(content: bytes, url: str) -> str | None:
         include_formatting=True,
         output_format="html",
     )
-    # まとめサイト・掲示板系でコンテンツが取れない場合は網羅性優先で再試行
+    # Retry with favor_recall for aggregator/bulletin-board sites where standard extraction fails
     if not result:
         result = trafilatura.extract(
             tree,

@@ -218,7 +218,7 @@ async def suggest_article_tags(
 
     existing = await session.execute(select(Tag))
     existing_names = [t.name for t in existing.scalars()]
-    # AI 要約があればそこからタグ候補を生成（より正確）
+    # Prefer AI summary as tag source for better accuracy
     text = article.ai_summary or article.content or article.summary or ""
     pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
     if not pairs:
@@ -226,7 +226,7 @@ async def suggest_article_tags(
     return [TagSuggestion(name=en, name_ja=ja) for en, ja in pairs]
 
 
-_BULK_TAG_BATCH = 10  # 一度に処理する最大件数
+_BULK_TAG_BATCH = 10  # max articles per batch
 
 
 @router.post("/articles/ai-tag-saved", response_model=dict)
@@ -234,7 +234,7 @@ async def ai_tag_saved_articles(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
-    """Saved 済みでタグなしの記事に AI タグ提案を実行して自動付与する（最大10件/回）。"""
+    """Run AI tag suggestions on saved articles without tags and auto-assign them (max 10 per call)."""
     stmt = select(Article).where(Article.is_saved == True).options(selectinload(Article.tags))  # noqa: E712
     result = await session.execute(stmt)
     untagged_ids = [a.id for a in result.scalars() if not a.tags]
@@ -245,12 +245,12 @@ async def ai_tag_saved_articles(
 
 
 async def _bulk_tag_job(article_ids: list[int]) -> None:
-    """Saved 記事に AI タグを一括付与するバックグラウンドタスク。"""
+    """Background task: batch-assign AI tags to saved articles."""
     from app.ai.tagger import suggest_tags
     from app.database import async_session
 
     async with async_session() as session:
-        # 既存タグ一覧を一度取得して全記事で共有
+        # Fetch existing tags once and share across all articles
         existing_result = await session.execute(select(Tag))
         existing_names = [t.name for t in existing_result.scalars()]
 

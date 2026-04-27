@@ -1,44 +1,46 @@
 # SnoReader
 
-Innoreader 代替のセルフホスト型 RSS リーダー。LAN / Tailnet 上の複数端末からブラウザでアクセスできる。
+A self-hosted RSS reader — access from multiple devices on your LAN or Tailnet via browser.
 
 ## Features
 
-- RSS / Atom フィードの購読・自動取得 (60 分間隔、並列取得)
-- 3 ペインレイアウト: フィード一覧 / 記事リスト / 記事リーダー
-- 記事の既読・保管管理
-- FTS5 による全文検索
-- trafilatura による記事本文抽出 (Reader モード)
-- タグ付け (手動、将来 AI 自動タグ対応)
+- RSS / Atom feed subscription with automatic refresh (60-minute interval, parallel fetching)
+- 3-pane layout: feed list / article list / article reader
+- Mark articles as read or saved
+- Full-text search via SQLite FTS5
+- Article content extraction in reader mode (trafilatura)
+- Bilingual tagging — English/Japanese display toggle, manual input with auto-translation
+- AI summary auto-generation (background job, Japanese bullet points)
+- AI tag suggestions (generated from AI summary)
 - OPML import / export
-- キーボードショートカット (`j`/`k` ナビゲーション、`s` 保管、`/` 検索)
-- Tailscale HTTPS によるセキュアなリモートアクセス
-- ダークモード対応
+- Saved articles import (Inoreader / Google Reader JSON format)
+- Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)
+- Secure remote access via Tailscale HTTPS
+- Dark mode support
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Python 3.12, FastAPI, SQLAlchemy (async) |
-| Frontend | React 19, Vite, TypeScript, Tailwind CSS, TanStack Query |
-| Database | SQLite (WAL mode) + FTS5 全文検索 |
-| Feed | feedparser, trafilatura |
+| Frontend | React 19, Vite, TypeScript, Tailwind CSS v4, TanStack Query |
+| Database | SQLite (WAL mode) + FTS5 full-text search |
+| Feed parsing | feedparser, trafilatura |
 | Scheduler | APScheduler 3.x |
+| AI (optional) | mlx-lm.server (local LLM, OpenAI-compatible) |
 
 ## Prerequisites
 
 - Python 3.12+
 - Node.js 20+
-- (本番) Tailscale
+- (production) Tailscale
 
 ## Setup
 
 ```bash
 # Backend
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate   # fish: source .venv/bin/activate.fish
-pip install -e .
+uv sync          # or: python3 -m venv .venv && source .venv/bin/activate && pip install -e .
 
 # Frontend
 cd frontend
@@ -48,47 +50,66 @@ npm install
 ## Development
 
 ```bash
-make dev          # backend (:8000) + frontend (Vite) を同時起動
+make dev          # starts backend (:8000) + frontend (Vite) concurrently
 ```
 
-http://localhost:5173 でアクセス。Vite が `/api` リクエストを backend にプロキシする。
+Open http://localhost:5173. Vite proxies `/api` requests to the backend.
+
+## AI Features (optional)
+
+AI summary and tag suggestion require a local LLM server.
+
+```bash
+# Start the LLM server (separate terminal)
+mlx_lm.server --model prism-ml/Ternary-Bonsai-8B-mlx-2bit --port 8880
+```
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `SNOREADER_LLM_BASE_URL` | `http://localhost:8880/v1` | LLM API base URL |
+| `SNOREADER_LLM_MODEL` | `default` | Model name |
+| `SNOREADER_LLM_TIMEOUT` | `120` | Request timeout (seconds) |
+| `SNOREADER_SUMMARIZE_INTERVAL_SECONDS` | `180` | Background summarization interval |
+| `SNOREADER_SUMMARIZE_BATCH_SIZE` | `5` | Articles per summarization batch |
+
+When the LLM server is available, SnoReader:
+- Auto-generates Japanese bullet-point summaries for articles (background job, priority: Saved > Unread > Read)
+- Suggests tags based on the AI summary
+- Auto-translates manually entered Japanese tags into English
 
 ## Production (Tailscale HTTPS)
 
 ```bash
-# 1. Tailscale 証明書を取得 (初回のみ)
+# 1. Obtain a Tailscale certificate (first time only)
 make cert HOST=your-host.ts.net
 
-# 2. フロントエンドビルド + HTTPS サーバー起動
+# 2. Build frontend + start HTTPS server
 make prod
 ```
 
-`https://your-host.ts.net` でアクセス。uvicorn が API と SPA 静的ファイルを配信する。
+Access via `https://your-host.ts.net`. uvicorn serves both the API and the SPA static files.
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `j` / `Arrow Down` | 次の記事を選択 |
-| `k` / `Arrow Up` | 前の記事を選択 |
-| `s` | 保管トグル |
-| `o` / `Enter` | 元記事をブラウザで開く |
-| `/` | 検索にフォーカス |
+| `j` / `Arrow Down` | Next article |
+| `k` / `Arrow Up` | Previous article |
+| `s` | Toggle save |
+| `o` / `Enter` | Open original article in browser |
+| `/` | Focus search |
 
-## Inoreader からの移行
+## Migrating from Inoreader
 
-Inoreader の Saved (starred) 記事を SnoReader にインポートできる。
+You can import your Inoreader Saved (starred) articles into SnoReader.
 
-### 方法 1: Inoreader データエクスポート
+1. In Inoreader, go to **Preferences > Data management > Export**
+2. Download the exported JSON (`starred.json`)
+3. In the SnoReader sidebar, click **Import Saved Articles (JSON)** and upload the file
 
-1. Inoreader で **Preferences > Data management > Export** を開く
-2. エクスポートされた JSON (starred.json) をダウンロード
-3. SnoReader サイドバーの **Import Saved Articles (JSON)** からアップロード
-
-### 対応フォーマット
-
-- Inoreader / Google Reader 形式 (`{"items": [...]}`)
-- 単純な JSON 配列 (`[{"url": "...", "title": "...", ...}]`)
+Supported formats:
+- Inoreader / Google Reader format: `{"items": [...]}`
+- Plain JSON array: `[{"url": "...", "title": "...", ...}]`
 
 ## Project Structure
 
@@ -96,33 +117,36 @@ Inoreader の Saved (starred) 記事を SnoReader にインポートできる。
 snoreader/
 ├── backend/
 │   └── app/
-│       ├── main.py          # FastAPI app + lifespan
-│       ├── models.py         # SQLAlchemy ORM models
-│       ├── schemas.py        # Pydantic request/response schemas
-│       ├── config.py         # Settings (env: SNOREADER_*)
-│       ├── database.py       # SQLite async engine
-│       ├── routers/          # API endpoints
-│       │   ├── feeds.py      #   feed CRUD
-│       │   ├── articles.py   #   article list/detail/search/extract
-│       │   ├── tags.py       #   tag CRUD + article tagging
-│       │   ├── opml.py       #   OPML import/export
-│       │   └── imports.py    #   Inoreader/article import
+│       ├── main.py               # FastAPI app + lifespan
+│       ├── models.py             # SQLAlchemy ORM models
+│       ├── schemas.py            # Pydantic request/response schemas
+│       ├── config.py             # Settings (env: SNOREADER_*)
+│       ├── database.py           # SQLite async engine
+│       ├── routers/
+│       │   ├── feeds.py          #   feed CRUD
+│       │   ├── articles.py       #   article list/detail/AI/search
+│       │   ├── tags.py           #   tag CRUD + article tagging
+│       │   ├── opml.py           #   OPML import/export
+│       │   └── imports.py        #   Inoreader/article import
 │       ├── services/
-│       │   ├── feed_fetcher.py      # RSS fetch + parse
+│       │   ├── feed_fetcher.py   #   RSS fetch + parse
 │       │   ├── content_extractor.py # trafilatura article extraction
-│       │   └── scheduler.py         # APScheduler periodic fetch
-│       └── ai/               # (future) LLM integration
+│       │   └── scheduler.py      #   APScheduler: feed refresh + AI summarization
+│       └── ai/
+│           ├── llm_client.py     #   OpenAI-compatible LLM client
+│           ├── summarizer.py     #   article summarization
+│           └── tagger.py         #   bilingual tag suggestion
 ├── frontend/
 │   └── src/
 │       ├── App.tsx
-│       ├── api/client.ts     # API client functions
-│       ├── types/index.ts    # TypeScript interfaces
-│       ├── hooks/            # TanStack Query hooks
+│       ├── api/client.ts         # API client functions
+│       ├── types/index.ts        # TypeScript interfaces
+│       ├── hooks/                # TanStack Query hooks
 │       └── components/
 │           ├── layout/FeedSidebar.tsx
 │           └── articles/{ArticleList,ArticleCard,ArticleReader}.tsx
-├── data/                     # SQLite DB (gitignored)
-├── certs/                    # TLS certificates (gitignored)
+├── data/                         # SQLite DB (gitignored)
+├── certs/                        # TLS certificates (gitignored)
 └── Makefile
 ```
 

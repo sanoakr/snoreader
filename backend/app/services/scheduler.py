@@ -35,7 +35,7 @@ async def _summarize_job():
         from app.models import Article
 
         async with async_session() as session:
-            # Saved > Unread > Read の優先順で未要約記事を取得
+            # Fetch unsummarized articles ordered by priority: Saved > Unread > Read
             stmt = (
                 select(Article)
                 .where(Article.ai_summary.is_(None))

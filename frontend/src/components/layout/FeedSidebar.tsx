@@ -94,10 +94,10 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           Saved
         </button>
 
-        {/* Tags エリア */}
+        {/* Tags section */}
         {tags && tags.length > 0 && (
           <>
-            {/* タグ管理ヘッダー */}
+            {/* Tag section header */}
             <div className="flex items-center justify-between px-3 pt-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-gray-400">Tags</span>
@@ -143,7 +143,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             </div>
 
             {tagManageMode ? (
-              /* 管理モード: 各タグに rename / delete アイコン */
+              /* Management mode: rename / delete icons per tag */
               <div className="px-3 pb-1 space-y-0.5">
                 {tags.map((tag) => (
                   <div key={tag.id} className="flex items-center gap-1 group">
@@ -188,7 +188,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 ))}
               </div>
             ) : (
-              /* 通常モード: コンパクトチップ */
+              /* Normal mode: compact chips */
               <div className="px-3 pt-0.5 pb-1 flex flex-wrap gap-1">
                 {tags.map((tag) => (
                   <button

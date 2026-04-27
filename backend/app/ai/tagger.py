@@ -92,7 +92,7 @@ async def translate_tags(names: list[str]) -> dict[str, str]:
     """
     if not names:
         return {}
-    # 静的マッピングで賄えるものは先に解決
+    # Resolve via static mapping first
     out = {n: _STATIC_JA[n] for n in names if n in _STATIC_JA}
     remaining = [n for n in names if n not in out]
     if not remaining:
