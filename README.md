@@ -15,7 +15,6 @@ A self-hosted RSS reader — access from multiple devices on your LAN or Tailnet
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)
-- Secure remote access via Tailscale HTTPS
 - Dark mode support
 
 ## Tech Stack
@@ -33,7 +32,6 @@ A self-hosted RSS reader — access from multiple devices on your LAN or Tailnet
 
 - Python 3.12+
 - Node.js 20+
-- (production) Tailscale
 
 ## Setup
 
@@ -77,17 +75,11 @@ When the LLM server is available, SnoReader:
 - Suggests tags based on the AI summary
 - Auto-translates manually entered Japanese tags into English
 
-## Production (Tailscale HTTPS)
+## Production
 
 ```bash
-# 1. Obtain a Tailscale certificate (first time only)
-make cert HOST=your-host.ts.net
-
-# 2. Build frontend + start HTTPS server
-make prod
+make prod   # build frontend + start backend on port 8000
 ```
-
-Access via `https://your-host.ts.net`. uvicorn serves both the API and the SPA static files.
 
 ## Keyboard Shortcuts
 

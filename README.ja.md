@@ -15,7 +15,6 @@
 - OPML インポート / エクスポート
 - Saved 記事インポート（Inoreader / Google Reader JSON 形式）
 - キーボードショートカット（`j`/`k` ナビ、`s` 保管、`/` 検索）
-- Tailscale HTTPS によるセキュアなリモートアクセス
 - ダークモード対応
 
 ## 技術スタック
@@ -33,7 +32,6 @@
 
 - Python 3.12+
 - Node.js 20+
-- （本番）Tailscale
 
 ## セットアップ
 
@@ -77,17 +75,11 @@ LLM サーバーが利用可能な場合、SnoReader は以下を自動実行す
 - AI 要約をもとにタグを提案
 - 手動入力された日本語タグを英語に自動翻訳
 
-## 本番デプロイ（Tailscale HTTPS）
+## 本番デプロイ
 
 ```bash
-# 1. Tailscale 証明書を取得（初回のみ）
-make cert HOST=your-host.ts.net
-
-# 2. フロントエンドビルド + HTTPS サーバー起動
-make prod
+make prod   # フロントエンドビルド + バックエンド起動（ポート 8000）
 ```
-
-`https://your-host.ts.net` でアクセス。uvicorn が API と SPA 静的ファイルを配信する。
 
 ## キーボードショートカット
 
