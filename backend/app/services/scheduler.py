@@ -87,6 +87,31 @@ async def _summarize_job():
                 except Exception as e:
                     logger.warning("Failed to suggest tags for article %d: %s", article.id, e)
 
+            # Phase 3: tag suggestions for unread unsaved articles (recommendation candidates)
+            # Uses content/summary directly — no ai_summary required
+            stmt3 = (
+                select(Article)
+                .where(
+                    Article.is_read == False,  # noqa: E712
+                    Article.is_saved == False,  # noqa: E712
+                    Article.tag_suggestions.is_(None),
+                )
+                .order_by(Article.published_at.desc())
+                .limit(settings.summarize_batch_size)
+            )
+            candidates = (await session.execute(stmt3)).scalars().all()
+            if candidates:
+                logger.info("Background summarize (phase3 rec candidates): processing %d articles", len(candidates))
+            for article in candidates:
+                try:
+                    text = article.ai_summary or article.content or article.summary or ""
+                    pairs = await _suggest_tags(article.title, text, existing_tags=existing_names)
+                    if pairs:
+                        article.tag_suggestions = _json.dumps([en for en, _ in pairs])
+                        await session.commit()
+                except Exception as e:
+                    logger.warning("Failed to suggest tags (phase3) for article %d: %s", article.id, e)
+
 
 def start_scheduler():
     global _scheduler

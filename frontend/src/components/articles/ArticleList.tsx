@@ -4,6 +4,7 @@ import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
 import type { Article, ArticleFilters } from '../../types';
 import { ArticleCard } from './ArticleCard';
 import { ArticleReader } from './ArticleReader';
+import { Spinner } from '../common/Spinner';
 
 interface Props {
   filters: ArticleFilters;
@@ -180,7 +181,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
 
         {/* Article list */}
         <div ref={listRef} className="flex-1 overflow-y-auto">
-          {isLoading && <p className="p-4 text-sm text-gray-400">Loading...</p>}
+          {isLoading && <div className="flex justify-center p-6"><Spinner /></div>}
           {!isLoading && articles.length === 0 && (
             <p className="p-4 text-sm text-gray-400">No articles found</p>
           )}
@@ -193,8 +194,8 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
             />
           ))}
           {(hasNextPage && !isSearching) && (
-            <div ref={sentinelRef} className="p-3 text-center text-xs text-gray-400">
-              {isFetchingNextPage ? 'Loading more...' : 'Scroll for more'}
+            <div ref={sentinelRef} className="flex justify-center p-3">
+              {isFetchingNextPage ? <Spinner size="sm" /> : <span className="text-xs text-gray-400">Scroll for more</span>}
             </div>
           )}
         </div>
