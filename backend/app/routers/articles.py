@@ -215,8 +215,10 @@ async def suggest_article_tags(
 
     from app.ai.tagger import suggest_tags
 
+    existing = await session.execute(select(Tag))
+    existing_names = [t.name for t in existing.scalars()]
     text = article.content or article.summary or ""
-    tags = await suggest_tags(article.title, text)
+    tags = await suggest_tags(article.title, text, existing_tags=existing_names)
     if not tags:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
     return tags
@@ -242,12 +244,16 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
     from app.database import async_session
 
     async with async_session() as session:
+        # 既存タグ一覧を一度取得して全記事で共有
+        existing_result = await session.execute(select(Tag))
+        existing_names = [t.name for t in existing_result.scalars()]
+
         for article_id in article_ids:
             article = await session.get(Article, article_id)
             if not article:
                 continue
             text = article.content or article.summary or ""
-            tags = await suggest_tags(article.title, text)
+            tags = await suggest_tags(article.title, text, existing_tags=existing_names)
             for tag_name in tags:
                 result = await session.execute(select(Tag).where(Tag.name == tag_name))
                 tag = result.scalar_one_or_none()
