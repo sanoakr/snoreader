@@ -116,8 +116,7 @@ async def add_tag_to_article(
         ja_name = input_name
         en_name = await translate_to_english(input_name)
         if not en_name:
-            # LLM 不可時: 日本語をそのまま name に（フォールバック）
-            en_name = input_name
+            raise HTTPException(status_code=503, detail="LLM unavailable — cannot translate Japanese tag to English. Please enter an English tag name.")
 
     result = await session.execute(select(Tag).where(Tag.name == en_name))
     tag = result.scalar_one_or_none()

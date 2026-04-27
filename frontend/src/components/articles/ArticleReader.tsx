@@ -74,9 +74,13 @@ export function ArticleReader({ articleId, tagLang }: Props) {
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
     if (!tagInput.trim()) return;
-    addTag.mutate({ articleId: article.id, name: tagInput.trim() });
-    setTagInput('');
-    setShowTagInput(false);
+    addTag.mutate(
+      { articleId: article.id, name: tagInput.trim() },
+      {
+        onSuccess: () => { setTagInput(''); setShowTagInput(false); },
+        onError: (err) => { alert((err as Error).message); },
+      }
+    );
   };
 
   const handleSuggestTags = () => {
