@@ -1,11 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as api from '../api/client';
 import type { ArticleFilters } from '../types';
 
-export function useArticles(filters: ArticleFilters, offset = 0, limit = 50) {
-  return useQuery({
-    queryKey: ['articles', filters, offset, limit],
-    queryFn: () => api.getArticles(filters, offset, limit),
+const ARTICLES_LIMIT = 50;
+
+export function useArticles(filters: ArticleFilters) {
+  return useInfiniteQuery({
+    queryKey: ['articles', filters],
+    queryFn: ({ pageParam = 0 }) => api.getArticles(filters, pageParam as number, ARTICLES_LIMIT),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((s, p) => s + p.items.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
   });
 }
 

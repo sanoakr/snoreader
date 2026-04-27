@@ -11,21 +11,21 @@ interface Props {
   tagLang: 'en' | 'ja';
 }
 
-const LIMIT = 50;
-
 export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [pages, setPages] = useState(1);
   const searchRef = useRef<HTMLInputElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Fetch multiple pages for infinite scroll
-  const pageQueries = Array.from({ length: pages }, (_, i) =>
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useArticles(filters, i * LIMIT, LIMIT)
-  );
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: isArticlesLoading,
+  } = useArticles(filters);
+
   const searchResults = useSearchArticles(searchQuery, { feed_id: filters.feed_id, is_saved: filters.is_saved });
   const markAllRead = useMarkAllRead();
   const updateArticle = useUpdateArticle();
@@ -35,34 +35,33 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
   const selectedTag = filters.tag_id != null ? tags?.find(t => t.id === filters.tag_id) : null;
 
   const isSearching = searchQuery.length > 0;
-  const firstPageData = pageQueries[0]?.data;
-  const total = isSearching ? (searchResults.data?.total ?? 0) : (firstPageData?.total ?? 0);
-  const isLoading = isSearching ? searchResults.isLoading : pageQueries[0]?.isLoading;
+  const isLoading = isSearching ? searchResults.isLoading : isArticlesLoading;
 
   const articles: Article[] = isSearching
     ? (searchResults.data?.items ?? [])
-    : pageQueries.flatMap(q => q.data?.items ?? []);
+    : (data?.pages.flatMap(p => p.items) ?? []);
 
-  const hasMore = !isSearching && articles.length < total;
+  const total = isSearching
+    ? (searchResults.data?.total ?? 0)
+    : (data?.pages[0]?.total ?? 0);
 
-  // Reset pages on filter/search change
+  // Reset scroll on filter/search change
   useEffect(() => {
-    setPages(1);
     listRef.current?.scrollTo(0, 0);
   }, [filters, searchQuery]);
 
   // Infinite scroll via IntersectionObserver
   useEffect(() => {
-    if (!sentinelRef.current || !hasMore) return;
+    if (!sentinelRef.current || !hasNextPage || isSearching) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) setPages(p => p + 1);
+        if (entries[0].isIntersecting && !isFetchingNextPage) fetchNextPage();
       },
       { rootMargin: '200px' }
     );
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore, articles.length]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, isSearching]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -183,7 +182,11 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               onClick={() => setSelectedId(article.id)}
             />
           ))}
-          {hasMore && <div ref={sentinelRef} className="p-3 text-center text-xs text-gray-400">Loading more...</div>}
+          {(hasNextPage && !isSearching) && (
+            <div ref={sentinelRef} className="p-3 text-center text-xs text-gray-400">
+              {isFetchingNextPage ? 'Loading more...' : 'Scroll for more'}
+            </div>
+          )}
         </div>
       </div>
 
