@@ -292,13 +292,19 @@ export function ArticleReader({ articleId, tagLang }: Props) {
               onSuccess: () => { suggestTried.current = false; },
             })}
             disabled={extractContent.isPending}
-            className="text-xs text-gray-400 hover:text-blue-500 disabled:opacity-50"
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-500 disabled:opacity-50"
             title="Re-fetch article content"
           >
-            {extractContent.isPending ? '取得中...' : '↺ 本文再取得'}
+            {extractContent.isPending ? (
+              <><Spinner size="sm" /><span>取得中...</span></>
+            ) : '↺ 本文再取得'}
           </button>
         </div>
-        {article.content ? (
+        {extractContent.isPending ? (
+          <div className="flex justify-center py-12">
+            <Spinner />
+          </div>
+        ) : article.content ? (
           <div
             className="prose dark:prose-invert max-w-none"
             dangerouslySetInnerHTML={{ __html: article.content }}
