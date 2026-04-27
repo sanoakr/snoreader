@@ -233,7 +233,11 @@ export function ArticleReader({ articleId, tagLang }: Props) {
           {article.ai_summary ? (
             <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded text-sm text-gray-700 dark:text-gray-300">
               <span className="text-xs font-medium text-purple-500 block mb-1">AI Summary</span>
-              {article.ai_summary}
+              <ul className="space-y-1">
+                {article.ai_summary.split('\n').filter(l => l.trim()).map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
             </div>
           ) : summarizeArticle.isPending ? (
             <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded text-sm text-gray-400">
