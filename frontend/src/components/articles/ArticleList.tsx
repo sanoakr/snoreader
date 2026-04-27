@@ -64,6 +64,21 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, isSearching]);
 
+  const currentIndex = articles.findIndex(a => a.id === selectedId);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < articles.length - 1;
+
+  const goNext = useCallback((idx: number) => {
+    const next = idx < articles.length - 1 ? idx + 1 : idx;
+    if (next === -1 && articles.length > 0) setSelectedId(articles[0].id);
+    else if (articles[next]) setSelectedId(articles[next].id);
+  }, [articles]);
+
+  const goPrev = useCallback((idx: number) => {
+    const prev = idx > 0 ? idx - 1 : 0;
+    if (articles[prev]) setSelectedId(articles[prev].id);
+  }, [articles]);
+
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
@@ -75,19 +90,13 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
       case 'j':
       case 'ArrowDown': {
         e.preventDefault();
-        const next = currentIndex < articles.length - 1 ? currentIndex + 1 : currentIndex;
-        if (next === -1 && articles.length > 0) {
-          setSelectedId(articles[0].id);
-        } else if (articles[next]) {
-          setSelectedId(articles[next].id);
-        }
+        goNext(currentIndex);
         break;
       }
       case 'k':
       case 'ArrowUp': {
         e.preventDefault();
-        const prev = currentIndex > 0 ? currentIndex - 1 : 0;
-        if (articles[prev]) setSelectedId(articles[prev].id);
+        goPrev(currentIndex);
         break;
       }
       case 's': {
@@ -211,7 +220,12 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
             >
               ← Back
             </button>
-            <ArticleReader articleId={selectedId} tagLang={tagLang} />
+            <ArticleReader
+              articleId={selectedId}
+              tagLang={tagLang}
+              onPrev={hasPrev ? () => goPrev(currentIndex) : undefined}
+              onNext={hasNext ? () => goNext(currentIndex) : undefined}
+            />
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">

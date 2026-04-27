@@ -9,10 +9,14 @@ import type { TagSuggestion } from '../../types';
 interface Props {
   articleId: number;
   tagLang: 'en' | 'ja';
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
-export function ArticleReader({ articleId, tagLang }: Props) {
+export function ArticleReader({ articleId, tagLang, onPrev, onNext }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
   const summarizeTried = useRef(false);
   const suggestTried = useRef(false);
   const { data: article, isLoading } = useQuery({
@@ -51,6 +55,29 @@ export function ArticleReader({ articleId, tagLang }: Props) {
   useEffect(() => {
     containerRef.current?.scrollTo(0, 0);
   }, [articleId]);
+
+  // Swipe navigation (mobile)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onStart = (e: TouchEvent) => {
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+    };
+    const onEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - touchStartX.current;
+      const dy = e.changedTouches[0].clientY - touchStartY.current;
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
+      if (dx < 0) onNext?.();
+      else onPrev?.();
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [onNext, onPrev]);
 
   // Auto-generate AI summary if not yet available
   useEffect(() => {
@@ -315,6 +342,28 @@ export function ArticleReader({ articleId, tagLang }: Props) {
           </div>
         )}
       </article>
+
+      {/* Floating prev/next buttons (mobile only) */}
+      {(onPrev || onNext) && (
+        <div className="md:hidden fixed bottom-6 right-4 flex flex-col gap-2 z-30">
+          <button
+            onClick={onPrev}
+            disabled={!onPrev}
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-gray-800/80 dark:bg-gray-200/80 text-white dark:text-gray-900 shadow-lg disabled:opacity-30 active:scale-95 transition-transform"
+            aria-label="Previous article"
+          >
+            ↑
+          </button>
+          <button
+            onClick={onNext}
+            disabled={!onNext}
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-gray-800/80 dark:bg-gray-200/80 text-white dark:text-gray-900 shadow-lg disabled:opacity-30 active:scale-95 transition-transform"
+            aria-label="Next article"
+          >
+            ↓
+          </button>
+        </div>
+      )}
     </div>
   );
 }
