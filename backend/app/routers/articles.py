@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database import get_session
-from app.models import Article, Feed
+from app.models import Article, ArticleTag, Feed
 from app.schemas import (
     ArticleDetail,
     ArticleOut,
@@ -26,6 +26,7 @@ async def list_articles(
     feed_id: int | None = None,
     is_read: bool | None = None,
     is_saved: bool | None = None,
+    tag_id: int | None = None,
     sort: str = "published_at",
     order: str = "desc",
     offset: int = Query(0, ge=0),
@@ -44,6 +45,9 @@ async def list_articles(
     if is_saved is not None:
         stmt = stmt.where(Article.is_saved == is_saved)
         count_stmt = count_stmt.where(Article.is_saved == is_saved)
+    if tag_id is not None:
+        stmt = stmt.where(Article.id.in_(select(ArticleTag.article_id).where(ArticleTag.tag_id == tag_id)))
+        count_stmt = count_stmt.where(Article.id.in_(select(ArticleTag.article_id).where(ArticleTag.tag_id == tag_id)))
 
     # Sort
     allowed_sorts = {"published_at", "fetched_at", "title"}

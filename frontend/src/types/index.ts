@@ -52,6 +52,7 @@ export interface ArticleFilters {
   feed_id?: number;
   is_read?: boolean;
   is_saved?: boolean;
+  tag_id?: number;
   sort?: string;
   order?: string;
 }

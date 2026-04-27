@@ -34,7 +34,7 @@ async def chat_completion(
                 json=payload,
             )
             resp.raise_for_status()
-        data = resp.json()
+            data = resp.json()
         return data["choices"][0]["message"]["content"]
     except httpx.ConnectError:
         logger.debug("LLM server not available at %s", settings.llm_base_url)

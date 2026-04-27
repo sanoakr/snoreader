@@ -91,81 +91,99 @@ export function ArticleReader({ articleId }: Props) {
           </div>
           <div className="mt-3">
             <button
-              onClick={() => updateArticle.mutate({ id: article.id, data: { is_saved: !article.is_saved } })}
+              onClick={() => {
+                const willBeSaved = !article.is_saved;
+                updateArticle.mutate(
+                  { id: article.id, data: { is_saved: willBeSaved } },
+                  {
+                    onSuccess: () => {
+                      if (willBeSaved && aiAvailable && !suggestedTags.length) {
+                        suggestTags.mutate(article.id, {
+                          onSuccess: (tags) => setSuggestedTags(tags),
+                        });
+                      }
+                    },
+                  }
+                );
+              }}
               className={`text-sm ${article.is_saved ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
             >
               {article.is_saved ? '★ Saved' : '☆ Save'}
             </button>
           </div>
 
-          {/* Tags */}
-          <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-            {article.tags?.map((tag) => (
-              <span
-                key={tag.id}
-                className="inline-flex items-center gap-0.5 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded"
-              >
-                {tag.name}
-                <button
-                  onClick={() => removeTag.mutate({ articleId: article.id, tagId: tag.id })}
-                  className="text-gray-400 hover:text-red-500 ml-0.5"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            {showTagInput ? (
-              <form onSubmit={handleAddTag} className="inline-flex">
-                <input
-                  type="text"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  placeholder="tag name"
-                  className="w-24 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
-                  autoFocus
-                  onBlur={() => { if (!tagInput) setShowTagInput(false); }}
-                  onKeyDown={(e) => { if (e.key === 'Escape') setShowTagInput(false); }}
-                />
-              </form>
-            ) : (
-              <button
-                onClick={() => setShowTagInput(true)}
-                className="text-xs text-gray-400 hover:text-blue-500"
-              >
-                + tag
-              </button>
-            )}
-            {aiAvailable && !suggestedTags.length && (
-              <button
-                onClick={handleSuggestTags}
-                disabled={suggestTags.isPending}
-                className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-              >
-                {suggestTags.isPending ? 'AI...' : 'AI suggest'}
-              </button>
-            )}
-          </div>
+          {/* Tags — Saved 記事のみ表示 */}
+          {article.is_saved && (
+            <>
+              <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                {article.tags?.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-0.5 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded"
+                  >
+                    {tag.name}
+                    <button
+                      onClick={() => removeTag.mutate({ articleId: article.id, tagId: tag.id })}
+                      className="text-gray-400 hover:text-red-500 ml-0.5"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {showTagInput ? (
+                  <form onSubmit={handleAddTag} className="inline-flex">
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      placeholder="tag name"
+                      className="w-24 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+                      autoFocus
+                      onBlur={() => { if (!tagInput) setShowTagInput(false); }}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setShowTagInput(false); }}
+                    />
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => setShowTagInput(true)}
+                    className="text-xs text-gray-400 hover:text-blue-500"
+                  >
+                    + tag
+                  </button>
+                )}
+                {aiAvailable && !suggestedTags.length && (
+                  <button
+                    onClick={handleSuggestTags}
+                    disabled={suggestTags.isPending}
+                    className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
+                  >
+                    {suggestTags.isPending ? 'AI...' : 'AI suggest'}
+                  </button>
+                )}
+              </div>
 
-          {/* AI suggested tags */}
-          {suggestedTags.length > 0 && (
-            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-purple-500">Suggested:</span>
-              {suggestedTags.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() => handleAcceptTag(tag)}
-                  className="px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
-                >
-                  + {tag}
-                </button>
-              ))}
-              <button
-                onClick={() => setSuggestedTags([])}
-                className="text-xs text-gray-400 hover:text-gray-600"
-              >
-                dismiss
-              </button>
-            </div>
+              {/* AI suggested tags */}
+              {suggestedTags.length > 0 && (
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-purple-500">Suggested:</span>
+                  {suggestedTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => handleAcceptTag(tag)}
+                      className="px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                    >
+                      + {tag}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setSuggestedTags([])}
+                    className="text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    dismiss
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
           {/* AI Summary */}

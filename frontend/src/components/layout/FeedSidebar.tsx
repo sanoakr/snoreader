@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
+import { useTags } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
 
@@ -11,6 +12,7 @@ interface Props {
 
 export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
   const { data: feeds, isLoading } = useFeeds();
+  const { data: tags } = useTags();
   const createFeed = useCreateFeed();
   const deleteFeed = useDeleteFeed();
   const refreshFeed = useRefreshFeed();
@@ -53,9 +55,9 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
       <nav className="flex-1 p-2 space-y-0.5">
         {/* All articles */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
-            filters.feed_id == null && filters.is_saved == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
           <span>All</span>
@@ -68,13 +70,32 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, tag_id: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-gray-200 dark:hover:bg-gray-800 ${
-            filters.is_saved === true ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+            filters.is_saved === true && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
           Saved
         </button>
+
+        {/* Tags */}
+        {tags && tags.length > 0 && (
+          <div className="px-3 pt-0.5 pb-1 flex flex-wrap gap-1">
+            {tags.map((tag) => (
+              <button
+                key={tag.id}
+                onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: tag.id })}
+                className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
+                  filters.tag_id === tag.id
+                    ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}
+              >
+                #{tag.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
