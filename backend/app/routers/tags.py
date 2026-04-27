@@ -97,20 +97,36 @@ async def delete_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
 async def add_tag_to_article(
     article_id: int,
     body: TagCreate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
     article = await session.get(Article, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    result = await session.execute(select(Tag).where(Tag.name == body.name))
+    input_name = body.name.strip()
+
+    if input_name.isascii():
+        # 英語入力: name に格納、name_ja は後でバックグラウンド補完
+        en_name = input_name.lower()
+        ja_name = body.name_ja
+    else:
+        # 日本語入力: LLM で英語名を生成して name に格納
+        from app.ai.tagger import translate_to_english
+        ja_name = input_name
+        en_name = await translate_to_english(input_name)
+        if not en_name:
+            # LLM 不可時: 日本語をそのまま name に（フォールバック）
+            en_name = input_name
+
+    result = await session.execute(select(Tag).where(Tag.name == en_name))
     tag = result.scalar_one_or_none()
     if not tag:
-        tag = Tag(name=body.name, name_ja=body.name_ja)
+        tag = Tag(name=en_name, name_ja=ja_name)
         session.add(tag)
         await session.flush()
-    elif body.name_ja and not tag.name_ja:
-        tag.name_ja = body.name_ja
+    elif ja_name and not tag.name_ja:
+        tag.name_ja = ja_name
 
     existing = await session.execute(
         select(ArticleTag).where(
@@ -122,7 +138,27 @@ async def add_tag_to_article(
         session.add(ArticleTag(article_id=article_id, tag_id=tag.id))
 
     await session.commit()
+
+    # 英語タグで name_ja 未設定の場合はバックグラウンドで翻訳
+    if tag.name_ja is None:
+        background_tasks.add_task(_translate_single_tag, tag.id)
+
     return TagOut.model_validate(tag)
+
+
+async def _translate_single_tag(tag_id: int) -> None:
+    """新規英語タグの name_ja をバックグラウンドで LLM 翻訳する。"""
+    from app.ai.tagger import translate_tags
+    from app.database import async_session
+
+    async with async_session() as session:
+        tag = await session.get(Tag, tag_id)
+        if not tag or tag.name_ja:
+            return
+        mapping = await translate_tags([tag.name])
+        if tag.name in mapping:
+            tag.name_ja = mapping[tag.name]
+            await session.commit()
 
 
 @router.delete("/articles/{article_id}/tags/{tag_id}", status_code=204)

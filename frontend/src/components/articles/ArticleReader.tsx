@@ -179,7 +179,7 @@ export function ArticleReader({ articleId, tagLang }: Props) {
                       type="text"
                       value={tagInput}
                       onChange={(e) => setTagInput(e.target.value)}
-                      placeholder="tag name"
+                      placeholder="英語 or 日本語"
                       className="w-24 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
                       autoFocus
                       onBlur={() => { if (!tagInput) setShowTagInput(false); }}

@@ -65,6 +65,25 @@ _STATIC_JA: dict[str, str] = {
 }
 
 
+async def translate_to_english(ja_name: str) -> str | None:
+    """Translate a Japanese tag to a single English lowercase word."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Translate the Japanese word to a single English lowercase word. "
+                "No spaces, no hyphens. Return ONLY the English word, nothing else."
+            ),
+        },
+        {"role": "user", "content": ja_name},
+    ]
+    result = await chat_completion(messages, max_tokens=10, temperature=0.1)
+    if not result:
+        return None
+    en = result.strip().lower().split()[0]
+    return en if en.isascii() and " " not in en and len(en) < 30 else None
+
+
 async def translate_tags(names: list[str]) -> dict[str, str]:
     """Translate English tag names to Japanese using LLM with static fallback.
 
