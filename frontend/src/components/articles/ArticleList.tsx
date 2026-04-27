@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArticles, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
+import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
 import type { Article, ArticleFilters } from '../../types';
 import { ArticleCard } from './ArticleCard';
 import { ArticleReader } from './ArticleReader';
@@ -27,6 +28,10 @@ export function ArticleList({ filters, onFilterChange }: Props) {
   const searchResults = useSearchArticles(searchQuery, { feed_id: filters.feed_id, is_saved: filters.is_saved });
   const markAllRead = useMarkAllRead();
   const updateArticle = useUpdateArticle();
+  const { data: tags } = useTags();
+  const bulkDeleteTags = useBulkDeleteTags();
+
+  const selectedTag = filters.tag_id != null ? tags?.find(t => t.id === filters.tag_id) : null;
 
   const isSearching = searchQuery.length > 0;
   const firstPageData = pageQueries[0]?.data;
@@ -142,9 +147,24 @@ export function ArticleList({ filters, onFilterChange }: Props) {
             <button onClick={() => onFilterChange({ ...filters, is_read: true })} className={filterBtnClass(filters.is_read === true)}>Read</button>
             <div className="flex-1" />
             <span className="text-xs text-gray-400">{total}</span>
-            <button onClick={() => markAllRead.mutate(filters.feed_id)} disabled={markAllRead.isPending} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">
-              Mark all read
-            </button>
+            {selectedTag ? (
+              <button
+                onClick={() => {
+                  if (!confirm(`タグ「${selectedTag.name}」を削除しますか？`)) return;
+                  bulkDeleteTags.mutate([selectedTag.id], {
+                    onSuccess: () => onFilterChange({ ...filters, tag_id: undefined }),
+                  });
+                }}
+                disabled={bulkDeleteTags.isPending}
+                className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50"
+              >
+                #{selectedTag.name} を削除
+              </button>
+            ) : (
+              <button onClick={() => markAllRead.mutate(filters.feed_id)} disabled={markAllRead.isPending} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">
+                Mark all read
+              </button>
+            )}
           </div>
         </div>
 
