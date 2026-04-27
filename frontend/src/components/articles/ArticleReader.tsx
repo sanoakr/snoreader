@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
 import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus, useExtractContent } from '../../hooks/useArticles';
+import { Spinner } from '../common/Spinner';
 import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
 import type { TagSuggestion } from '../../types';
 
@@ -13,6 +14,7 @@ interface Props {
 export function ArticleReader({ articleId, tagLang }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const summarizeTried = useRef(false);
+  const suggestTried = useRef(false);
   const { data: article, isLoading } = useQuery({
     queryKey: ['article', articleId],
     queryFn: () => getArticle(articleId),
@@ -31,9 +33,10 @@ export function ArticleReader({ articleId, tagLang }: Props) {
 
   const aiAvailable = aiStatus?.available ?? false;
 
-  // Reset summarize attempt flag when article changes
+  // Reset attempt flags when article changes
   useEffect(() => {
     summarizeTried.current = false;
+    suggestTried.current = false;
     setSuggestedTags([]);
   }, [articleId]);
 
@@ -57,8 +60,30 @@ export function ArticleReader({ articleId, tagLang }: Props) {
     }
   }, [article?.id, aiAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-suggest tags once AI summary is available (saved or not)
+  useEffect(() => {
+    if (article && article.ai_summary && aiAvailable && !suggestTried.current) {
+      suggestTried.current = true;
+      suggestTags.mutate(article.id, {
+        onSuccess: (suggestions) => {
+          const existing = existingTags ?? [];
+          const autoAdd = suggestions.filter(s =>
+            existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
+          );
+          const manual = suggestions.filter(s =>
+            !existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
+          );
+          if (article.is_saved) {
+            autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
+          }
+          setSuggestedTags(manual);
+        },
+      });
+    }
+  }, [article?.id, article?.ai_summary, aiAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (isLoading) {
-    return <div className="p-6 text-gray-400">Loading...</div>;
+    return <div className="flex justify-center p-10"><Spinner /></div>;
   }
 
   if (!article) {
@@ -110,7 +135,8 @@ export function ArticleReader({ articleId, tagLang }: Props) {
       { id: article.id, data: { is_saved: willBeSaved } },
       {
         onSuccess: () => {
-          if (willBeSaved && aiAvailable && !suggestedTags.length) {
+          if (willBeSaved && aiAvailable && !suggestTried.current) {
+            suggestTried.current = true;
             suggestTags.mutate(article.id, {
               onSuccess: (suggestions) => {
                 const existing = existingTags ?? [];
@@ -161,76 +187,73 @@ export function ArticleReader({ articleId, tagLang }: Props) {
 
           {/* Tags — only shown for saved articles */}
           {article.is_saved && (
-            <>
-              <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                {article.tags?.map((tag) => (
-                  <span
-                    key={tag.id}
-                    className="inline-flex items-center gap-0.5 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded"
-                  >
-                    {tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
-                    <button
-                      onClick={() => removeTag.mutate({ articleId: article.id, tagId: tag.id })}
-                      className="text-gray-400 hover:text-red-500 ml-0.5"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                {showTagInput ? (
-                  <form onSubmit={handleAddTag} className="inline-flex">
-                    <input
-                      type="text"
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      placeholder="英語 or 日本語"
-                      className="w-24 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
-                      autoFocus
-                      onBlur={() => { if (!tagInput) setShowTagInput(false); }}
-                      onKeyDown={(e) => { if (e.key === 'Escape') setShowTagInput(false); }}
-                    />
-                  </form>
-                ) : (
+            <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+              {article.tags?.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="inline-flex items-center gap-0.5 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded"
+                >
+                  {tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
                   <button
-                    onClick={() => setShowTagInput(true)}
-                    className="text-xs text-gray-400 hover:text-blue-500"
+                    onClick={() => removeTag.mutate({ articleId: article.id, tagId: tag.id })}
+                    className="text-gray-400 hover:text-red-500 ml-0.5"
                   >
-                    + tag
+                    ×
                   </button>
-                )}
-                {aiAvailable && !suggestedTags.length && (
-                  <button
-                    onClick={handleSuggestTags}
-                    disabled={suggestTags.isPending}
-                    className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-                  >
-                    {suggestTags.isPending ? 'AI...' : 'AI suggest'}
-                  </button>
-                )}
-              </div>
-
-              {/* AI suggested tags */}
-              {suggestedTags.length > 0 && (
-                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs text-purple-500">Suggested:</span>
-                  {suggestedTags.map((s) => (
-                    <button
-                      key={s.name}
-                      onClick={() => handleAcceptTag(s)}
-                      className="px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
-                    >
-                      + {tagLang === 'ja' && s.name_ja ? s.name_ja : s.name}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setSuggestedTags([])}
-                    className="text-xs text-gray-400 hover:text-gray-600"
-                  >
-                    dismiss
-                  </button>
-                </div>
+                </span>
+              ))}
+              {showTagInput ? (
+                <form onSubmit={handleAddTag} className="inline-flex">
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    placeholder="英語 or 日本語"
+                    className="w-24 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+                    autoFocus
+                    onBlur={() => { if (!tagInput) setShowTagInput(false); }}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setShowTagInput(false); }}
+                  />
+                </form>
+              ) : (
+                <button
+                  onClick={() => setShowTagInput(true)}
+                  className="text-xs text-gray-400 hover:text-blue-500"
+                >
+                  + tag
+                </button>
               )}
-            </>
+              {aiAvailable && !suggestedTags.length && !suggestTags.isPending && (
+                <button
+                  onClick={handleSuggestTags}
+                  className="text-xs text-purple-400 hover:text-purple-600"
+                >
+                  AI suggest
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* AI suggested tags — shown for any article once available */}
+          {suggestedTags.length > 0 && (
+            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-purple-500">Suggested:</span>
+              {suggestedTags.map((s) => (
+                <button
+                  key={s.name}
+                  onClick={() => handleAcceptTag(s)}
+                  className="px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                >
+                  + {tagLang === 'ja' && s.name_ja ? s.name_ja : s.name}
+                </button>
+              ))}
+              <button
+                onClick={() => setSuggestedTags([])}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                dismiss
+              </button>
+            </div>
           )}
 
           {/* AI Summary */}
@@ -244,9 +267,9 @@ export function ArticleReader({ articleId, tagLang }: Props) {
               </ul>
             </div>
           ) : summarizeArticle.isPending ? (
-            <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded text-sm text-gray-400">
-              <span className="text-xs font-medium text-purple-400 block mb-1">AI Summary</span>
-              Summarizing...
+            <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded flex items-center gap-2">
+              <Spinner size="sm" />
+              <span className="text-xs text-purple-400">Summarizing...</span>
             </div>
           ) : null}
         </header>

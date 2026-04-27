@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
+import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
+import { useRecommendedCount, useSavedCount } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
@@ -33,6 +35,8 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const articlesFileRef = useRef<HTMLInputElement>(null);
 
   const totalUnread = feeds?.reduce((s, f) => s + f.unread_count, 0) ?? 0;
+  const { data: recommendedCount } = useRecommendedCount();
+  const { data: savedCount } = useSavedCount();
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,11 +73,26 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
       </div>
 
       <nav className="flex-1 p-2 space-y-0.5">
+        {/* Recommended */}
+        <button
+          onClick={() => onFilterChange({ recommended: true })}
+          className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
+            filters.recommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+          }`}
+        >
+          <span>✦ Recommend</span>
+          {!!recommendedCount && (
+            <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+              {recommendedCount}
+            </span>
+          )}
+        </button>
+
         {/* All articles */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined, recommended: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
-            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null && !filters.recommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
           <span>All</span>
@@ -86,12 +105,15 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, tag_id: undefined })}
-          className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-gray-200 dark:hover:bg-gray-800 ${
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, tag_id: undefined, recommended: undefined })}
+          className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.is_saved === true && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
-          Saved
+          <span>Saved</span>
+          {!!savedCount && (
+            <span className="text-xs text-gray-400 tabular-nums">{savedCount}</span>
+          )}
         </button>
 
         {/* Tags section */}
@@ -193,7 +215,13 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 {tags.map((tag) => (
                   <button
                     key={tag.id}
-                    onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: tag.id })}
+                    onClick={() => onFilterChange({
+                      ...filters,
+                      feed_id: undefined,
+                      is_saved: undefined,
+                      tag_id: filters.tag_id === tag.id ? undefined : tag.id,
+                      recommended: undefined,
+                    })}
                     className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
                       filters.tag_id === tag.id
                         ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
@@ -211,11 +239,11 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
         {/* Feed list */}
-        {isLoading && <p className="text-xs text-gray-400 px-3">Loading...</p>}
+        {isLoading && <div className="flex justify-center py-3"><Spinner size="sm" /></div>}
         {feeds?.map((feed) => (
           <div key={feed.id} className="group flex items-center">
             <button
-              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined })}
+              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined, recommended: undefined })}
               className={`flex-1 text-left px-3 py-1.5 rounded text-sm truncate flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-800 ${
                 filters.feed_id === feed.id ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
               }`}
@@ -229,7 +257,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
               )}
               <span className="truncate flex-1">{feed.title || feed.url}</span>
               {feed.unread_count > 0 && (
-                <span className="text-xs text-gray-500 ml-1">{feed.unread_count}</span>
+                <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">{feed.unread_count}</span>
               )}
             </button>
             <div className="hidden group-hover:flex items-center gap-0.5 pr-1">

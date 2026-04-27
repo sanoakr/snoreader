@@ -41,6 +41,12 @@ export function getArticles(
   offset = 0,
   limit = 50,
 ): Promise<PaginatedArticles> {
+  if (filters.recommended) {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (filters.sort) params.set('sort', filters.sort);
+    if (filters.order) params.set('order', filters.order);
+    return fetchJSON(`${BASE}/articles/recommended?${params}`);
+  }
   const params = new URLSearchParams();
   if (filters.feed_id != null) params.set('feed_id', String(filters.feed_id));
   if (filters.is_read != null) params.set('is_read', String(filters.is_read));

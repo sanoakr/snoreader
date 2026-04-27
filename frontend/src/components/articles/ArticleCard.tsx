@@ -65,6 +65,9 @@ export function ArticleCard({ article, isSelected, onClick }: Props) {
         <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
           <span className="truncate">{article.feed_title}</span>
           <span>{timeAgo(article.published_at)}</span>
+          {article.rec_score != null && (
+            <span className="text-amber-500 font-medium">★{article.rec_score}</span>
+          )}
         </div>
       </div>
     </div>

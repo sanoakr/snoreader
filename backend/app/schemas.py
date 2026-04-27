@@ -73,6 +73,7 @@ class ArticleOut(BaseModel):
     is_read: bool
     is_saved: bool
     feed_title: str | None = None
+    rec_score: int | None = None
 
     model_config = {"from_attributes": True}
 

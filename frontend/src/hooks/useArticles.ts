@@ -1,6 +1,6 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as api from '../api/client';
-import type { ArticleFilters } from '../types';
+import type { ArticleFilters, PaginatedArticles } from '../types';
 
 const ARTICLES_LIMIT = 50;
 
@@ -21,8 +21,21 @@ export function useUpdateArticle() {
   return useMutation({
     mutationFn: ({ id, data }: { id: number; data: { is_read?: boolean; is_saved?: boolean } }) =>
       api.updateArticle(id, data),
-    onSuccess: (_result, { id }) => {
-      qc.invalidateQueries({ queryKey: ['articles'] });
+    onSuccess: (result, { id }) => {
+      // Update article in-place so it stays visible until the user navigates away
+      qc.setQueriesData<InfiniteData<PaginatedArticles>>(
+        { queryKey: ['articles'] },
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            pages: old.pages.map(page => ({
+              ...page,
+              items: page.items.map(a => a.id === id ? { ...a, ...result } : a),
+            })),
+          };
+        },
+      );
       qc.invalidateQueries({ queryKey: ['feeds'] });
       qc.invalidateQueries({ queryKey: ['article', id] });
     },
@@ -71,6 +84,22 @@ export function useAiStatus() {
   return useQuery({
     queryKey: ['ai-status'],
     queryFn: api.getAiStatus,
+    staleTime: 60_000,
+  });
+}
+
+export function useRecommendedCount() {
+  return useQuery({
+    queryKey: ['recommended-count'],
+    queryFn: () => api.getArticles({ recommended: true }, 0, 1).then(r => r.total),
+    staleTime: 60_000,
+  });
+}
+
+export function useSavedCount() {
+  return useQuery({
+    queryKey: ['saved-count'],
+    queryFn: () => api.getArticles({ is_saved: true }, 0, 1).then(r => r.total),
     staleTime: 60_000,
   });
 }
