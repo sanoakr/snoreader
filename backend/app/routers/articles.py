@@ -218,7 +218,8 @@ async def suggest_article_tags(
 
     existing = await session.execute(select(Tag))
     existing_names = [t.name for t in existing.scalars()]
-    text = article.content or article.summary or ""
+    # AI 要約があればそこからタグ候補を生成（より正確）
+    text = article.ai_summary or article.content or article.summary or ""
     pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
     if not pairs:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
@@ -257,7 +258,7 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
             article = await session.get(Article, article_id)
             if not article:
                 continue
-            text = article.content or article.summary or ""
+            text = article.ai_summary or article.content or article.summary or ""
             pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
             for tag_name, tag_name_ja in pairs:
                 result = await session.execute(select(Tag).where(Tag.name == tag_name))
