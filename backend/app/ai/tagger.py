@@ -10,9 +10,10 @@ from app.ai.llm_client import chat_completion
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "You are a content tagger. Given an article title and text, "
-    "suggest 1-3 tags that represent the broad topic categories. "
+    "You are a content tagger. Suggest 1-3 broad topic tags for an article. "
     "Rules:\n"
+    "- The TITLE is the most important signal — base tags primarily on the title\n"
+    "- Use the body text only as secondary context\n"
     "- Always use English as the primary tag (single lowercase word, no spaces)\n"
     "- Also provide a Japanese translation for each tag\n"
     "- Format: english|日本語 for each tag, comma-separated\n"
@@ -124,11 +125,12 @@ async def suggest_tags(
 
     Returns list of (name_en, name_ja) tuples. Empty list if LLM unavailable.
     """
-    content = text[:2000]
     user_parts = []
     if existing_tags:
         user_parts.append(f"Existing tags: {', '.join(existing_tags)}")
-    user_parts.append(f"Title: {title}\n\n{content}")
+    user_parts.append(f"Title: {title}")
+    if text:
+        user_parts.append(f"Body: {text[:500]}")
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(user_parts)},
