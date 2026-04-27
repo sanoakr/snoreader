@@ -11,8 +11,8 @@ export function useTags() {
 export function useAddTag() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ articleId, name }: { articleId: number; name: string }) =>
-      api.addTagToArticle(articleId, name),
+    mutationFn: ({ articleId, name, name_ja }: { articleId: number; name: string; name_ja?: string | null }) =>
+      api.addTagToArticle(articleId, name, name_ja),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['article'] });
       qc.invalidateQueries({ queryKey: ['tags'] });

@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, Feed, PaginatedArticles, Tag } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -80,7 +80,7 @@ export function summarizeArticle(id: number): Promise<ArticleDetail> {
   return fetchJSON(`${BASE}/articles/${id}/summarize`, { method: 'POST' });
 }
 
-export function suggestTags(id: number): Promise<string[]> {
+export function suggestTags(id: number): Promise<TagSuggestion[]> {
   return fetchJSON(`${BASE}/articles/${id}/suggest-tags`, { method: 'POST' });
 }
 
@@ -130,11 +130,11 @@ export function bulkDeleteTags(tag_ids: number[]): Promise<{ deleted: number }> 
   });
 }
 
-export function addTagToArticle(articleId: number, name: string): Promise<Tag> {
+export function addTagToArticle(articleId: number, name: string, name_ja?: string | null): Promise<Tag> {
   return fetchJSON(`${BASE}/articles/${articleId}/tags`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, name_ja: name_ja ?? null }),
   });
 }
 

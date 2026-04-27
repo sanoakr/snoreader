@@ -29,10 +29,25 @@ function useDarkMode() {
   return [dark, () => setDark(d => !d)] as const;
 }
 
+function useTagLang() {
+  const [lang, setLang] = useState<'en' | 'ja'>(() => {
+    return (localStorage.getItem('tagLang') as 'en' | 'ja') ?? 'en';
+  });
+
+  const toggle = () => setLang(l => {
+    const next = l === 'en' ? 'ja' : 'en';
+    localStorage.setItem('tagLang', next);
+    return next;
+  });
+
+  return [lang, toggle] as const;
+}
+
 function AppInner() {
   const [filters, setFilters] = useState<ArticleFilters>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, toggleDark] = useDarkMode();
+  const [tagLang, toggleTagLang] = useTagLang();
 
   const handleFilterChange = (f: ArticleFilters) => {
     setFilters(f);
@@ -66,16 +81,22 @@ function AppInner() {
       <div className={`fixed z-50 md:relative md:z-auto transition-transform duration-200 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
       }`}>
-        <FeedSidebar filters={filters} onFilterChange={handleFilterChange} darkToggle={
-          <button onClick={toggleDark} className="hidden md:block p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-sm" title={dark ? 'Light mode' : 'Dark mode'}>
-            {dark ? '☀' : '☾'}
-          </button>
-        } />
+        <FeedSidebar
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          tagLang={tagLang}
+          onToggleTagLang={toggleTagLang}
+          darkToggle={
+            <button onClick={toggleDark} className="hidden md:block p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-sm" title={dark ? 'Light mode' : 'Dark mode'}>
+              {dark ? '☀' : '☾'}
+            </button>
+          }
+        />
       </div>
 
       {/* Main content */}
       <div className="flex-1 min-w-0 pt-12 md:pt-0">
-        <ArticleList filters={filters} onFilterChange={setFilters} />
+        <ArticleList filters={filters} onFilterChange={setFilters} tagLang={tagLang} />
       </div>
     </div>
   );

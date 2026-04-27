@@ -8,11 +8,12 @@ import { ArticleReader } from './ArticleReader';
 interface Props {
   filters: ArticleFilters;
   onFilterChange: (f: ArticleFilters) => void;
+  tagLang: 'en' | 'ja';
 }
 
 const LIMIT = 50;
 
-export function ArticleList({ filters, onFilterChange }: Props) {
+export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pages, setPages] = useState(1);
@@ -196,7 +197,7 @@ export function ArticleList({ filters, onFilterChange }: Props) {
             >
               ← Back
             </button>
-            <ArticleReader articleId={selectedId} />
+            <ArticleReader articleId={selectedId} tagLang={tagLang} />
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">

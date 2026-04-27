@@ -16,6 +16,7 @@ from app.schemas import (
     ArticleUpdate,
     MarkAllReadRequest,
     PaginatedArticles,
+    TagSuggestion,
 )
 
 router = APIRouter(tags=["articles"])
@@ -203,7 +204,7 @@ async def summarize_article(
     return detail
 
 
-@router.post("/articles/{article_id}/suggest-tags", response_model=list[str])
+@router.post("/articles/{article_id}/suggest-tags", response_model=list[TagSuggestion])
 async def suggest_article_tags(
     article_id: int,
     session: AsyncSession = Depends(get_session),
@@ -218,10 +219,10 @@ async def suggest_article_tags(
     existing = await session.execute(select(Tag))
     existing_names = [t.name for t in existing.scalars()]
     text = article.content or article.summary or ""
-    tags = await suggest_tags(article.title, text, existing_tags=existing_names)
-    if not tags:
+    pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
+    if not pairs:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
-    return tags
+    return [TagSuggestion(name=en, name_ja=ja) for en, ja in pairs]
 
 
 _BULK_TAG_BATCH = 10  # 一度に処理する最大件数
@@ -257,14 +258,16 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
             if not article:
                 continue
             text = article.content or article.summary or ""
-            tags = await suggest_tags(article.title, text, existing_tags=existing_names)
-            for tag_name in tags:
+            pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
+            for tag_name, tag_name_ja in pairs:
                 result = await session.execute(select(Tag).where(Tag.name == tag_name))
                 tag = result.scalar_one_or_none()
                 if not tag:
-                    tag = Tag(name=tag_name)
+                    tag = Tag(name=tag_name, name_ja=tag_name_ja)
                     session.add(tag)
                     await session.flush()
+                elif tag_name_ja and not tag.name_ja:
+                    tag.name_ja = tag_name_ja
                 dup = await session.execute(
                     select(ArticleTag).where(
                         ArticleTag.article_id == article_id,

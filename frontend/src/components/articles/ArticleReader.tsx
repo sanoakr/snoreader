@@ -3,12 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
 import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useAiStatus } from '../../hooks/useArticles';
 import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
+import type { TagSuggestion } from '../../types';
 
 interface Props {
   articleId: number;
+  tagLang: 'en' | 'ja';
 }
 
-export function ArticleReader({ articleId }: Props) {
+export function ArticleReader({ articleId, tagLang }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const summarizeTried = useRef(false);
   const { data: article, isLoading } = useQuery({
@@ -24,7 +26,7 @@ export function ArticleReader({ articleId }: Props) {
   const { data: existingTags } = useTags();
   const [tagInput, setTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
-  const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
+  const [suggestedTags, setSuggestedTags] = useState<TagSuggestion[]>([]);
 
   const aiAvailable = aiStatus?.available ?? false;
 
@@ -78,23 +80,23 @@ export function ArticleReader({ articleId }: Props) {
 
   const handleSuggestTags = () => {
     suggestTags.mutate(article.id, {
-      onSuccess: (tags) => {
+      onSuccess: (suggestions) => {
         const existing = existingTags ?? [];
-        const autoAdd = tags.filter(t =>
-          existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+        const autoAdd = suggestions.filter(s =>
+          existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
         );
-        const manual = tags.filter(t =>
-          !existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+        const manual = suggestions.filter(s =>
+          !existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
         );
-        autoAdd.forEach(name => addTag.mutate({ articleId: article.id, name }));
+        autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
         setSuggestedTags(manual);
       },
     });
   };
 
-  const handleAcceptTag = (name: string) => {
-    addTag.mutate({ articleId: article.id, name });
-    setSuggestedTags(prev => prev.filter(t => t !== name));
+  const handleAcceptTag = (suggestion: TagSuggestion) => {
+    addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
+    setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
   };
 
   const handleSaveToggle = () => {
@@ -105,15 +107,15 @@ export function ArticleReader({ articleId }: Props) {
         onSuccess: () => {
           if (willBeSaved && aiAvailable && !suggestedTags.length) {
             suggestTags.mutate(article.id, {
-              onSuccess: (tags) => {
+              onSuccess: (suggestions) => {
                 const existing = existingTags ?? [];
-                const autoAdd = tags.filter(t =>
-                  existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+                const autoAdd = suggestions.filter(s =>
+                  existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
                 );
-                const manual = tags.filter(t =>
-                  !existing.some(e => e.name.toLowerCase() === t.toLowerCase())
+                const manual = suggestions.filter(s =>
+                  !existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
                 );
-                autoAdd.forEach(name => addTag.mutate({ articleId: article.id, name }));
+                autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
                 setSuggestedTags(manual);
               },
             });
@@ -161,7 +163,7 @@ export function ArticleReader({ articleId }: Props) {
                     key={tag.id}
                     className="inline-flex items-center gap-0.5 px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded"
                   >
-                    {tag.name}
+                    {tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
                     <button
                       onClick={() => removeTag.mutate({ articleId: article.id, tagId: tag.id })}
                       className="text-gray-400 hover:text-red-500 ml-0.5"
@@ -206,13 +208,13 @@ export function ArticleReader({ articleId }: Props) {
               {suggestedTags.length > 0 && (
                 <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                   <span className="text-xs text-purple-500">Suggested:</span>
-                  {suggestedTags.map((tag) => (
+                  {suggestedTags.map((s) => (
                     <button
-                      key={tag}
-                      onClick={() => handleAcceptTag(tag)}
+                      key={s.name}
+                      onClick={() => handleAcceptTag(s)}
                       className="px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
                     >
-                      + {tag}
+                      + {tagLang === 'ja' && s.name_ja ? s.name_ja : s.name}
                     </button>
                   ))}
                   <button
@@ -245,6 +247,7 @@ export function ArticleReader({ articleId }: Props) {
           <img
             src={article.image_url}
             alt=""
+            referrerPolicy="no-referrer"
             className="w-full max-h-72 object-cover rounded-lg mb-4"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />

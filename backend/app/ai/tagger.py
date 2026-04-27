@@ -13,18 +13,44 @@ _SYSTEM_PROMPT = (
     "You are a content tagger. Given an article title and text, "
     "suggest 1-3 tags that represent the broad topic categories. "
     "Rules:\n"
-    "- Each tag must be a SINGLE word (no spaces, no hyphens)\n"
-    "- Japanese tags: one word (e.g. AI、セキュリティ、政治)\n"
-    "- English tags: one lowercase word (e.g. python, security, science)\n"
-    "- Use Japanese for Japanese content, English for English content\n"
-    "- Prefer broad categories over specific details\n"
+    "- Always use English as the primary tag (single lowercase word, no spaces)\n"
+    "- Also provide a Japanese translation for each tag\n"
+    "- Format: english|日本語 for each tag, comma-separated\n"
+    "- Examples: ai|AI, security|セキュリティ, python|Python, politics|政治\n"
+    "- Use broad categories, not specific details\n"
     "- If existing tags are listed, reuse them when appropriate\n"
-    "Return ONLY a comma-separated list, nothing else."
+    "Return ONLY the comma-separated pairs, nothing else."
 )
 
 
-async def suggest_tags(title: str, text: str, existing_tags: list[str] | None = None) -> list[str]:
-    """Suggest tags for an article. Returns empty list if LLM is unavailable."""
+def _parse_tag_pairs(raw: str) -> list[tuple[str, str | None]]:
+    """Parse 'en|ja,en|ja,...' into list of (en, ja) tuples."""
+    pairs = []
+    for item in re.split(r"[,\n]", raw):
+        item = item.strip().strip('"\'')
+        if not item:
+            continue
+        if "|" in item:
+            parts = item.split("|", 1)
+            en = parts[0].strip().lower()
+            ja = parts[1].strip() or None
+        else:
+            en = item.lower()
+            ja = None
+        if en and " " not in en and len(en) < 30:
+            pairs.append((en, ja))
+    return pairs[:3]
+
+
+async def suggest_tags(
+    title: str,
+    text: str,
+    existing_tags: list[str] | None = None,
+) -> list[tuple[str, str | None]]:
+    """Suggest tags for an article.
+
+    Returns list of (name_en, name_ja) tuples. Empty list if LLM unavailable.
+    """
     content = text[:2000]
     user_parts = []
     if existing_tags:
@@ -34,10 +60,7 @@ async def suggest_tags(title: str, text: str, existing_tags: list[str] | None = 
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(user_parts)},
     ]
-    result = await chat_completion(messages, max_tokens=40, temperature=0.1)
+    result = await chat_completion(messages, max_tokens=60, temperature=0.1)
     if not result:
         return []
-    tags = [t.strip().lower().strip('"\'') for t in re.split(r"[,\n]", result)]
-    # スペースを含む複合タグは除外（1単語のみ）
-    tags = [t for t in tags if t and " " not in t and len(t) < 30]
-    return tags[:3]
+    return _parse_tag_pairs(result)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urljoin
 
 import httpx
 import trafilatura
@@ -32,18 +33,35 @@ _BROWSER_HEADERS = {
 }
 
 
-def _fix_html(html: str) -> str:
-    """Convert trafilatura-specific tags to standard HTML."""
+def _fix_html(html: str, base_url: str = "") -> str:
+    """Convert trafilatura-specific tags to standard HTML and fix image URLs."""
     def _graphic_to_img(m: re.Match) -> str:
         attrs = m.group(1)
         src = _ATTR_SRC.search(attrs)
         alt = _ATTR_ALT.search(attrs)
         src_val = src.group(1) if src else ""
         alt_val = alt.group(1) if alt else ""
-        return f'<img src="{src_val}" alt="{alt_val}" loading="lazy" style="max-width:100%">'
+        if base_url and src_val and not src_val.startswith(('http', '//', 'data:')):
+            src_val = urljoin(base_url, src_val)
+        return f'<img src="{src_val}" alt="{alt_val}" loading="lazy">'
 
     html = _GRAPHIC_RE.sub(_graphic_to_img, html)
     html = _NESTED_PRE.sub(r'<pre>\1</pre>', html)
+
+    # 相対 img src を絶対 URL に変換 + hotlink 対策で referrerpolicy 追加
+    def _fix_img_tag(m: re.Match) -> str:
+        tag = m.group(0)
+        def _abs_src(sm: re.Match) -> str:
+            src = sm.group(1)
+            if base_url and src and not src.startswith(('http', '//', 'data:')):
+                src = urljoin(base_url, src)
+            return f'src="{src}"'
+        tag = re.sub(r'src="([^"]*)"', _abs_src, tag)
+        if 'referrerpolicy' not in tag:
+            tag = tag.replace('<img', '<img referrerpolicy="no-referrer"', 1)
+        return tag
+
+    html = re.sub(r'<img\b[^>]*>', _fix_img_tag, html)
     return html
 
 
@@ -90,7 +108,7 @@ def _extract_from_bytes(content: bytes, url: str) -> str | None:
             output_format="html",
         )
     if result:
-        result = _fix_html(result)
+        result = _fix_html(result, base_url=url)
     return result
 
 

@@ -6,3 +6,43 @@ body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* 記事コンテンツ内の画像 */
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 0.5em 0;
+}
+
+/* 掲示板・まとめサイト向け: blockquote をコメント風に */
+.prose blockquote {
+  border-left: 3px solid #cbd5e1;
+  padding: 0.4em 0.8em;
+  margin: 0.5em 0;
+  background: #f8fafc;
+  border-radius: 0 4px 4px 0;
+  font-style: normal;
+  color: inherit;
+}
+
+.dark .prose blockquote {
+  border-left-color: #475569;
+  background: #1e293b;
+}
+
+/* blockquote 内の引用符を非表示 */
+.prose blockquote p::before,
+.prose blockquote p::after {
+  content: none;
+}
+
+/* 掲示板コメント間の区切りを明確に */
+.prose > p + p {
+  margin-top: 0.6em;
+}
+
+/* 連続 blockquote（掲示板コメント群）を詰める */
+.prose blockquote + blockquote {
+  margin-top: 0.25em;
+}

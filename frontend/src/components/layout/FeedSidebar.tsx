@@ -7,10 +7,12 @@ import type { ArticleFilters } from '../../types';
 interface Props {
   filters: ArticleFilters;
   onFilterChange: (f: ArticleFilters) => void;
+  tagLang: 'en' | 'ja';
+  onToggleTagLang: () => void;
   darkToggle?: React.ReactNode;
 }
 
-export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
+export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang, darkToggle }: Props) {
   const { data: feeds, isLoading } = useFeeds();
   const { data: tags } = useTags();
   const createFeed = useCreateFeed();
@@ -96,7 +98,16 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
           <>
             {/* タグ管理ヘッダー */}
             <div className="flex items-center justify-between px-3 pt-1">
-              <span className="text-xs text-gray-400">Tags</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Tags</span>
+                <button
+                  onClick={onToggleTagLang}
+                  className="text-[10px] px-1 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
+                  title="Toggle tag language"
+                >
+                  {tagLang === 'en' ? 'EN' : 'JA'}
+                </button>
+              </div>
               <div className="flex items-center gap-1">
                 {tagManageMode && (
                   <button
@@ -141,7 +152,9 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
                       </form>
                     ) : (
                       <>
-                        <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">#{tag.name}</span>
+                        <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">
+                        #{tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
+                      </span>
                         <button
                           onClick={() => { setEditingTagId(tag.id); setEditingTagName(tag.name); }}
                           className="text-gray-300 hover:text-blue-500 text-xs opacity-0 group-hover:opacity-100"
@@ -174,7 +187,7 @@ export function FeedSidebar({ filters, onFilterChange, darkToggle }: Props) {
                         : 'text-gray-500 dark:text-gray-400'
                     }`}
                   >
-                    #{tag.name}
+                    #{tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
                   </button>
                 ))}
               </div>

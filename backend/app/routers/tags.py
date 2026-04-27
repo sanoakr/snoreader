@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Article, ArticleTag, Tag
-from app.schemas import BulkDeleteTagsRequest, TagCreate, TagOut, TagUpdate
+from app.schemas import BulkDeleteTagsRequest, TagCreate, TagOut, TagSuggestion, TagUpdate
 
 router = APIRouter(tags=["tags"])
 
@@ -75,9 +75,11 @@ async def add_tag_to_article(
     result = await session.execute(select(Tag).where(Tag.name == body.name))
     tag = result.scalar_one_or_none()
     if not tag:
-        tag = Tag(name=body.name)
+        tag = Tag(name=body.name, name_ja=body.name_ja)
         session.add(tag)
         await session.flush()
+    elif body.name_ja and not tag.name_ja:
+        tag.name_ja = body.name_ja
 
     existing = await session.execute(
         select(ArticleTag).where(

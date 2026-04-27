@@ -8,12 +8,19 @@ from pydantic import BaseModel, HttpUrl
 class TagOut(BaseModel):
     id: int
     name: str
+    name_ja: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class TagCreate(BaseModel):
     name: str
+    name_ja: str | None = None
+
+
+class TagSuggestion(BaseModel):
+    name: str
+    name_ja: str | None = None
 
 
 class TagUpdate(BaseModel):

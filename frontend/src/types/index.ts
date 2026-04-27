@@ -15,6 +15,12 @@ export interface Feed {
 export interface Tag {
   id: number;
   name: string;
+  name_ja: string | null;
+}
+
+export interface TagSuggestion {
+  name: string;
+  name_ja: string | null;
 }
 
 export interface Article {
