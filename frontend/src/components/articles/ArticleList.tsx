@@ -156,8 +156,8 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
           <div className="flex items-center gap-1.5 flex-wrap">
             {!filters.recommended && (
               <>
-                <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
                 <button onClick={() => onFilterChange({ ...filters, is_read: false })} className={filterBtnClass(filters.is_read === false)}>Unread</button>
+                <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
                 <button onClick={() => onFilterChange({ ...filters, is_read: true })} className={filterBtnClass(filters.is_read === true)}>Read</button>
               </>
             )}

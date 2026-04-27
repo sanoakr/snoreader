@@ -44,7 +44,7 @@ function useTagLang() {
 }
 
 function AppInner() {
-  const [filters, setFilters] = useState<ArticleFilters>({});
+  const [filters, setFilters] = useState<ArticleFilters>({ is_read: false });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, toggleDark] = useDarkMode();
   const [tagLang, toggleTagLang] = useTagLang();
