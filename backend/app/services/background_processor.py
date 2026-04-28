@@ -3,7 +3,8 @@
 Replaces the APScheduler-based _summarize_job. Runs as a persistent asyncio task,
 processing one article at a time to keep the LLM queue free for foreground requests.
 
-Summary and tag generation are two separate LLM calls to avoid format contamination.
+Uses a single combined LLM call (summarize_and_tag) because the Ternary-Bonsai-8B
+model can only generate tag pairs reliably as part of a structured SUMMARY+TAGS output.
 """
 from __future__ import annotations
 
@@ -26,8 +27,7 @@ async def _process_one() -> bool:
     """Try to process one pending article. Returns True if work was done."""
     import json as _json
 
-    from app.ai.summarizer import summarize_article
-    from app.ai.tagger import suggest_tags
+    from app.ai.processor import summarize_and_tag
     from app.ai.task_queue import PRIORITY_BACKGROUND
     from app.database import async_session
     from app.models import Article, Tag
@@ -41,7 +41,7 @@ async def _process_one() -> bool:
         def _skip(stmt):
             return stmt.where(Article.id.not_in(skip_ids)) if skip_ids else stmt
 
-        # Phase 1: articles needing summary (tags generated right after)
+        # Phase 1: articles needing summary + tags (highest priority: saved > unread > newest)
         stmt = _skip(
             select(Article)
             .where(Article.ai_summary.is_(None))
@@ -66,65 +66,52 @@ async def _process_one() -> bool:
             if article:
                 article_id = article.id
                 title = article.title
-                text = article.ai_summary or ""
+                # Use existing summary as context so combined call improves accuracy
+                text = article.ai_summary or article.content or article.summary or ""
                 phase = 2
             else:
-                # Phase 3: tag suggestions for unread/unsaved recommendation candidates
-                stmt = _skip(
-                    select(Article)
-                    .where(
-                        Article.is_read == False,  # noqa: E712
-                        Article.is_saved == False,  # noqa: E712
-                        Article.tag_suggestions.is_(None),
-                    )
-                    .order_by(Article.published_at.desc())
-                    .limit(1)
-                )
-                article = (await session.execute(stmt)).scalars().first()
-                if article:
-                    article_id = article.id
-                    title = article.title
-                    text = article.ai_summary or article.content or article.summary or ""
-                    phase = 3
-                else:
-                    return False  # Nothing to do
+                return False  # Nothing to do
 
-    # LLM calls outside session so the connection is free during the long call.
-    # Summary and tags are separate calls with distinct prompts to prevent format contamination.
+    # LLM call outside session — single combined call for both summary and tags
     try:
-        if phase == 1:
-            summary = await summarize_article(title, text, priority=PRIORITY_BACKGROUND)
-            if not summary:
-                _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
-                return True
-            # Use summary as context for tagging (better accuracy than raw content)
-            pairs = await suggest_tags(title, summary, existing_tags=existing_names, priority=PRIORITY_BACKGROUND)
-        else:
-            summary = None
-            pairs = await suggest_tags(title, text, existing_tags=existing_names, priority=PRIORITY_BACKGROUND)
-            if not pairs:
-                _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
-                return True
+        summary, pairs = await summarize_and_tag(
+            title, text, existing_tags=existing_names, priority=PRIORITY_BACKGROUND
+        )
     except Exception as e:
         logger.warning("LLM call failed (phase %d, article %d): %s", phase, article_id, e)
         _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
         return True
 
-    import json as _json
+    if not summary and not pairs:
+        # LLM unavailable or model returned nothing parseable
+        _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        return True
 
     async with async_session() as session:
         article = await session.get(Article, article_id)
         if not article:
             return True
         if phase == 1:
-            article.ai_summary = summary
+            if summary:
+                article.ai_summary = summary
             if pairs:
                 article.tag_suggestions = _json.dumps([en for en, _ in pairs])
-        else:
-            if pairs:
-                article.tag_suggestions = _json.dumps([en for en, _ in pairs])
+            elif summary:
+                # Summary succeeded but no tags; mark processed to avoid loop
+                # (Phase 2 will retry tags later)
+                pass
             else:
-                return True  # Nothing to write, skip
+                # Both empty — skip this article temporarily
+                _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+                return True
+        else:  # phase == 2
+            if pairs:
+                article.tag_suggestions = _json.dumps([en for en, _ in pairs])
+                if summary:
+                    article.ai_summary = summary  # update if improved
+            else:
+                _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+                return True
         await session.commit()
 
     logger.debug("Phase%d processed article %d: %s", phase, article_id, title[:50])

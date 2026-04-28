@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from app.ai.llm_client import chat_completion
@@ -33,12 +34,14 @@ def _clean_summary(raw: str) -> str | None:
 async def summarize_article(title: str, text: str, priority: int | None = None) -> str | None:
     """Generate a summary for an article. Returns None if LLM is unavailable."""
     content = text[:3000]
+    # Unique per-article hash prefix prevents mlx-lm KV cache reuse across articles
+    uid = hashlib.md5(f"sum:{title}".encode()).hexdigest()[:8]
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                f"Summarize only this article, ignoring any previous context.\n\n"
+                f"[{uid}] Summarize only this article.\n\n"
                 f"Title: {title}\n\n{content}"
             ),
         },

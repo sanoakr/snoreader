@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 
@@ -24,11 +25,14 @@ _SYSTEM_PROMPT = (
 )
 
 
+_VALID_EN_TAG = re.compile(r"^[a-z][a-z0-9]{1,28}$")  # lowercase letters/digits only, 2-29 chars
+
+
 def _parse_tag_pairs(raw: str) -> list[tuple[str, str | None]]:
     """Parse 'en|ja,en|ja,...' into list of (en, ja) tuples."""
     pairs = []
     for item in re.split(r"[,\n]", raw):
-        item = item.strip().strip('"\'')
+        item = item.strip().strip("\"'")
         if not item:
             continue
         if "|" in item:
@@ -36,9 +40,9 @@ def _parse_tag_pairs(raw: str) -> list[tuple[str, str | None]]:
             en = parts[0].strip().lower()
             ja = parts[1].strip() or None
         else:
-            en = item.lower()
+            en = item.lower().strip()
             ja = None
-        if en and " " not in en and len(en) < 30:
+        if _VALID_EN_TAG.match(en):
             pairs.append((en, ja))
     return pairs[:3]
 
@@ -126,7 +130,10 @@ async def suggest_tags(
 
     Returns list of (name_en, name_ja) tuples. Empty list if LLM unavailable.
     """
-    user_parts = ["Tag only this article, ignoring any previous context."]
+    # Unique per-article hash prefix prevents mlx-lm KV cache reuse across articles.
+    # "tag:" prefix differs from "sum:" used in summarizer to break cache chain.
+    uid = hashlib.md5(f"tag:{title}".encode()).hexdigest()[:8]
+    user_parts = [f"[{uid}] Tag only this article."]
     if existing_tags:
         user_parts.append(f"Existing tags: {', '.join(existing_tags)}")
     user_parts.append(f"Title: {title}")
