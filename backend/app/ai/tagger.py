@@ -125,7 +125,7 @@ async def suggest_tags(
 
     Returns list of (name_en, name_ja) tuples. Empty list if LLM unavailable.
     """
-    user_parts = []
+    user_parts = ["Tag only this article, ignoring any previous context."]
     if existing_tags:
         user_parts.append(f"Existing tags: {', '.join(existing_tags)}")
     user_parts.append(f"Title: {title}")

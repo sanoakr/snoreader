@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -9,6 +10,10 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Serialise all LLM calls to prevent context bleed on the server side.
+# mlx-lm.server may reuse KV-cache state across concurrent requests.
+_llm_lock = asyncio.Lock()
 
 
 async def chat_completion(
@@ -27,21 +32,22 @@ async def chat_completion(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
-    try:
-        async with httpx.AsyncClient(timeout=settings.llm_timeout) as client:
-            resp = await client.post(
-                f"{settings.llm_base_url}/chat/completions",
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        return data["choices"][0]["message"]["content"]
-    except httpx.ConnectError:
-        logger.debug("LLM server not available at %s", settings.llm_base_url)
-        return None
-    except Exception as e:
-        logger.warning("LLM request failed: %s", e)
-        return None
+    async with _llm_lock:
+        try:
+            async with httpx.AsyncClient(timeout=settings.llm_timeout) as client:
+                resp = await client.post(
+                    f"{settings.llm_base_url}/chat/completions",
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        except httpx.ConnectError:
+            logger.debug("LLM server not available at %s", settings.llm_base_url)
+            return None
+        except Exception as e:
+            logger.warning("LLM request failed: %s", e)
+            return None
 
 
 async def is_available() -> bool:
