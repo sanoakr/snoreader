@@ -227,10 +227,13 @@ async def extract_article_content(
         article.content = content
 
         from app.ai.processor import summarize_and_tag
+        from app.ai.task_queue import PRIORITY_FOREGROUND
         existing = await session.execute(select(Tag.name))
         existing_names = list(existing.scalars())
         text = content or article.summary or ""
-        summary, pairs = await summarize_and_tag(article.title, text, existing_tags=existing_names)
+        summary, pairs = await summarize_and_tag(
+            article.title, text, existing_tags=existing_names, priority=PRIORITY_FOREGROUND
+        )
         if summary:
             article.ai_summary = summary
             if pairs:
@@ -263,9 +266,10 @@ async def summarize_article(
         raise HTTPException(status_code=404, detail="Article not found")
 
     from app.ai.summarizer import summarize_article as _summarize
+    from app.ai.task_queue import PRIORITY_FOREGROUND
 
     text = article.content or article.summary or ""
-    summary = await _summarize(article.title, text)
+    summary = await _summarize(article.title, text, priority=PRIORITY_FOREGROUND)
     if summary is None:
         raise HTTPException(status_code=503, detail="LLM server unavailable")
 
@@ -296,12 +300,14 @@ async def suggest_article_tags(
         raise HTTPException(status_code=404, detail="Article not found")
 
     from app.ai.tagger import suggest_tags
+    from app.ai.task_queue import PRIORITY_FOREGROUND
 
     existing = await session.execute(select(Tag))
     existing_names = [t.name for t in existing.scalars()]
-    # Prefer AI summary as tag source for better accuracy
     text = article.ai_summary or article.content or article.summary or ""
-    pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
+    pairs = await suggest_tags(
+        article.title, text, existing_tags=existing_names, priority=PRIORITY_FOREGROUND
+    )
     if not pairs:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
     return [TagSuggestion(name=en, name_ja=ja) for en, ja in pairs]
@@ -363,9 +369,10 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
 
 @router.get("/ai/status")
 async def ai_status(session: AsyncSession = Depends(get_session)):
-    """Check LLM availability and background summarization queue depth."""
+    """Check LLM availability and background processing queue depth."""
     from app.ai.llm_client import is_available
-    from app.services.scheduler import summarize_job_running
+    from app.ai.task_queue import queue_depth
+    from app.services.background_processor import is_running
 
     available = await is_available()
     pending_summary = await session.scalar(
@@ -379,7 +386,8 @@ async def ai_status(session: AsyncSession = Depends(get_session)):
     return {
         "available": available,
         "base_url": settings.llm_base_url,
-        "running": summarize_job_running(),
+        "running": is_running(),
+        "queue_depth": queue_depth(),
         "pending_summary": pending_summary,
         "pending_tags": pending_tags,
     }

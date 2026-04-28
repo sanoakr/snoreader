@@ -65,6 +65,7 @@ async def summarize_and_tag(
     title: str,
     text: str,
     existing_tags: list[str] | None = None,
+    priority: int | None = None,
 ) -> tuple[str | None, list[tuple[str, str | None]]]:
     """Generate summary and tag suggestions in a single LLM call.
 
@@ -81,7 +82,7 @@ async def summarize_and_tag(
             ),
         },
     ]
-    result = await chat_completion(messages, max_tokens=400, temperature=0.2)
+    result = await chat_completion(messages, max_tokens=400, temperature=0.2, priority=priority)
     if not result:
         return None, []
     return _parse_output(result)

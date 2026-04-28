@@ -9,7 +9,10 @@ from sqlalchemy import text
 
 from app.database import engine
 from app.models import Base
+from app.ai import task_queue
 from app.routers import articles, feeds, imports, opml, tags
+from app.services.background_processor import start as start_bg_processor
+from app.services.background_processor import stop as stop_bg_processor
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 FTS_SETUP = """
@@ -47,9 +50,13 @@ async def lifespan(app: FastAPI):
         for trigger_sql in FTS_TRIGGERS:
             await conn.execute(text(trigger_sql))
 
+    task_queue.start()
     start_scheduler()
+    start_bg_processor()
     yield
+    stop_bg_processor()
     stop_scheduler()
+    task_queue.stop()
 
 
 app = FastAPI(title="SnoReader", version="0.1.0", lifespan=lifespan)
