@@ -404,6 +404,19 @@ async def ai_status(session: AsyncSession = Depends(get_session)):
     }
 
 
+def _to_fts_query(raw: str) -> str:
+    """Convert a user-typed string into a safe FTS5 phrase query.
+
+    FTS5 はバッククオートや記号を演算子として解釈するため、利用者が入力した
+    文字列は「フレーズ」として二重引用符で括り、内部の `"` のみエスケープする。
+    空白で区切られた語は AND 検索になるよう、語ごとにフレーズ化する。
+    """
+    tokens = [t for t in raw.split() if t]
+    if not tokens:
+        return ""
+    return " ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens)
+
+
 @router.get("/search", response_model=PaginatedArticles)
 async def search_articles(
     q: str = Query(..., min_length=1),
@@ -413,11 +426,15 @@ async def search_articles(
     limit: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
 ):
+    fts_q = _to_fts_query(q)
+    if not fts_q:
+        return PaginatedArticles(items=[], total=0, offset=offset, limit=limit)
+
     # FTS5 search
     fts_query = text(
         "SELECT rowid, rank FROM articles_fts WHERE articles_fts MATCH :q ORDER BY rank"
     )
-    fts_result = await session.execute(fts_query, {"q": q})
+    fts_result = await session.execute(fts_query, {"q": fts_q})
     matching_ids = [row[0] for row in fts_result]
 
     if not matching_ids:

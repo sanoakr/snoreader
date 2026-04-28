@@ -15,13 +15,20 @@ from app.services.background_processor import start as start_bg_processor
 from app.services.background_processor import stop as stop_bg_processor
 from app.services.scheduler import start_scheduler, stop_scheduler
 
-FTS_SETUP = """
+# trigram トークナイザは CJK の部分一致検索に対応する（unicode61 では空白で
+# 区切られない日本語が 1 トークン化されてしまい部分一致できない）
+FTS_TOKENIZER = "trigram"
+
+FTS_SETUP = f"""
 CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
     title, summary, content,
     content='articles',
-    content_rowid='id'
+    content_rowid='id',
+    tokenize='{FTS_TOKENIZER}'
 );
 """
+
+FTS_TRIGGER_NAMES = ("articles_fts_ai", "articles_fts_au", "articles_fts_ad")
 
 FTS_TRIGGERS = [
     """CREATE TRIGGER IF NOT EXISTS articles_fts_ai AFTER INSERT ON articles BEGIN
@@ -46,9 +53,30 @@ async def lifespan(app: FastAPI):
     # Create tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # 既存 FTS テーブルが古いトークナイザのまま残っていれば作り直す
+        existing = await conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE name='articles_fts'")
+        )
+        existing_sql = (existing.scalar() or "").lower()
+        needs_rebuild = False
+        if existing_sql and FTS_TOKENIZER not in existing_sql:
+            for trigger_name in FTS_TRIGGER_NAMES:
+                await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+            await conn.execute(text("DROP TABLE IF EXISTS articles_fts"))
+            needs_rebuild = True
+        elif not existing_sql:
+            needs_rebuild = True
+
         await conn.execute(text(FTS_SETUP))
         for trigger_sql in FTS_TRIGGERS:
             await conn.execute(text(trigger_sql))
+
+        if needs_rebuild:
+            # 既存 articles を新しいトークナイザで再インデックス化
+            await conn.execute(
+                text("INSERT INTO articles_fts(articles_fts) VALUES('rebuild')")
+            )
 
     task_queue.start()
     start_scheduler()
