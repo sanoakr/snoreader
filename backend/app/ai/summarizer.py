@@ -22,6 +22,6 @@ async def summarize_article(title: str, text: str) -> str | None:
     content = text[:3000]
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": f"Title: {title}\n\n{content}"},
+        {"role": "user", "content": f"Summarize only this article, ignoring any previous context.\n\nTitle: {title}\n\n{content}"},
     ]
     return await chat_completion(messages, max_tokens=256, temperature=0.2)
