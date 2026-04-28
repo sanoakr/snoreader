@@ -294,18 +294,29 @@ async def suggest_article_tags(
     article_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Suggest tags for an article using AI."""
+    """Return pre-computed tag suggestions, or generate via AI if not yet available."""
+    import json as _json
+
     article = await session.get(Article, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    from app.ai.tagger import suggest_tags
+    # Use pre-computed suggestions from summarize_and_tag when available
+    if article.tag_suggestions:
+        en_names = _json.loads(article.tag_suggestions)
+        if en_names:
+            tag_result = await session.execute(select(Tag).where(Tag.name.in_(en_names)))
+            tag_map = {t.name: t.name_ja for t in tag_result.scalars()}
+            return [TagSuggestion(name=en, name_ja=tag_map.get(en)) for en in en_names]
+
+    # Fallback: generate via combined LLM call
+    from app.ai.processor import summarize_and_tag
     from app.ai.task_queue import PRIORITY_FOREGROUND
 
-    existing = await session.execute(select(Tag))
-    existing_names = [t.name for t in existing.scalars()]
+    existing = await session.execute(select(Tag.name))
+    existing_names = list(existing.scalars())
     text = article.ai_summary or article.content or article.summary or ""
-    pairs = await suggest_tags(
+    _, pairs = await summarize_and_tag(
         article.title, text, existing_tags=existing_names, priority=PRIORITY_FOREGROUND
     )
     if not pairs:
