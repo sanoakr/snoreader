@@ -13,8 +13,21 @@ _SYSTEM_PROMPT = (
     "ALWAYS respond in Japanese, regardless of the article's language. "
     "Summarize as 3-5 bullet points, each starting with '・'. "
     "Focus on key facts and takeaways. Do not add opinions. "
-    "Return ONLY the bullet points in Japanese, nothing else."
+    "Return ONLY the bullet points in Japanese. "
+    "Do NOT output any English tags, labels, or 'word|translation' pairs. "
+    "Do NOT output section headers like 'SUMMARY:' or 'TAGS:'. "
+    "Output ONLY Japanese bullet points starting with '・', nothing else."
 )
+
+
+def _clean_summary(raw: str) -> str | None:
+    """Extract only ・-prefixed lines from LLM output, discarding any contamination."""
+    lines = [
+        line.strip()
+        for line in raw.splitlines()
+        if line.strip().startswith("・")
+    ]
+    return "\n".join(lines) if lines else None
 
 
 async def summarize_article(title: str, text: str, priority: int | None = None) -> str | None:
@@ -22,6 +35,15 @@ async def summarize_article(title: str, text: str, priority: int | None = None) 
     content = text[:3000]
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": f"Summarize only this article, ignoring any previous context.\n\nTitle: {title}\n\n{content}"},
+        {
+            "role": "user",
+            "content": (
+                f"Summarize only this article, ignoring any previous context.\n\n"
+                f"Title: {title}\n\n{content}"
+            ),
+        },
     ]
-    return await chat_completion(messages, max_tokens=256, temperature=0.2, priority=priority)
+    raw = await chat_completion(messages, max_tokens=256, temperature=0.2, priority=priority)
+    if not raw:
+        return None
+    return _clean_summary(raw)
