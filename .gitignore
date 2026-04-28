@@ -20,5 +20,8 @@ data/*.db-*
 certs/
 .host
 
+# Logs
+logs/
+
 # OS
 .DS_Store
