@@ -404,17 +404,10 @@ async def ai_status(session: AsyncSession = Depends(get_session)):
     }
 
 
-def _to_fts_query(raw: str) -> str:
-    """Convert a user-typed string into a safe FTS5 phrase query.
-
-    FTS5 はバッククオートや記号を演算子として解釈するため、利用者が入力した
-    文字列は「フレーズ」として二重引用符で括り、内部の `"` のみエスケープする。
-    空白で区切られた語は AND 検索になるよう、語ごとにフレーズ化する。
-    """
-    tokens = [t for t in raw.split() if t]
-    if not tokens:
-        return ""
-    return " ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens)
+def _like_pattern(token: str) -> str:
+    """LIKE のメタ文字 (% _ \\) をエスケープして部分一致用パターンを返す。"""
+    escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 @router.get("/search", response_model=PaginatedArticles)
@@ -426,15 +419,26 @@ async def search_articles(
     limit: int = Query(50, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
 ):
-    fts_q = _to_fts_query(q)
-    if not fts_q:
+    tokens = [t for t in q.split() if t]
+    if not tokens:
         return PaginatedArticles(items=[], total=0, offset=offset, limit=limit)
 
-    # FTS5 search
-    fts_query = text(
-        "SELECT rowid, rank FROM articles_fts WHERE articles_fts MATCH :q ORDER BY rank"
-    )
-    fts_result = await session.execute(fts_query, {"q": fts_q})
+    # 全文検索は articles_fts への LIKE で実装する。
+    # trigram トークナイザは LIKE 検索を内部のトリグラムインデックスで高速化し、
+    # かつ MATCH と異なり 2 文字以下のクエリ（「睡眠」「日本」など）や FTS5 の
+    # 演算子記号 (/ + : 等) を含むクエリでも安全に動作する。
+    where_clauses: list[str] = []
+    params: dict[str, str] = {}
+    for idx, token in enumerate(tokens):
+        key = f"q{idx}"
+        params[key] = _like_pattern(token)
+        where_clauses.append(
+            f"(title LIKE :{key} ESCAPE '\\' "
+            f"OR summary LIKE :{key} ESCAPE '\\' "
+            f"OR content LIKE :{key} ESCAPE '\\')"
+        )
+    sql = f"SELECT rowid FROM articles_fts WHERE {' AND '.join(where_clauses)}"
+    fts_result = await session.execute(text(sql), params)
     matching_ids = [row[0] for row in fts_result]
 
     if not matching_ids:

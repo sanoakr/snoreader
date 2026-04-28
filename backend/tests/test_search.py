@@ -87,6 +87,25 @@ async def test_search_japanese_substring(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_two_char_japanese(client: AsyncClient) -> None:
+    """trigram は 3 文字未満をトークン化しないが、LIKE 経由で 2 文字キーワードもヒットさせる。"""
+    res = await client.get("/api/search", params={"q": "業務"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] >= 1, data
+
+
+@pytest.mark.asyncio
+async def test_search_multi_token_and(client: AsyncClient) -> None:
+    """空白区切りの複数語は AND 検索になる。"""
+    res = await client.get("/api/search", params={"q": "業務 アプリ"})
+    assert res.status_code == 200
+    assert res.json()["total"] >= 1
+    res2 = await client.get("/api/search", params={"q": "業務 Tailscale"})
+    assert res2.json()["total"] == 0
+
+
+@pytest.mark.asyncio
 async def test_search_english(client: AsyncClient) -> None:
     """英単語の検索が動作すること。"""
     res = await client.get("/api/search", params={"q": "Tailscale"})
