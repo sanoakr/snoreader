@@ -17,11 +17,11 @@ _SYSTEM_PROMPT = (
 )
 
 
-async def summarize_article(title: str, text: str) -> str | None:
+async def summarize_article(title: str, text: str, priority: int | None = None) -> str | None:
     """Generate a summary for an article. Returns None if LLM is unavailable."""
     content = text[:3000]
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": f"Summarize only this article, ignoring any previous context.\n\nTitle: {title}\n\n{content}"},
     ]
-    return await chat_completion(messages, max_tokens=256, temperature=0.2)
+    return await chat_completion(messages, max_tokens=256, temperature=0.2, priority=priority)

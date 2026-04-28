@@ -66,7 +66,7 @@ _STATIC_JA: dict[str, str] = {
 }
 
 
-async def translate_to_english(ja_name: str) -> str | None:
+async def translate_to_english(ja_name: str, priority: int | None = None) -> str | None:
     """Translate a Japanese tag to a single English lowercase word."""
     messages = [
         {
@@ -78,14 +78,14 @@ async def translate_to_english(ja_name: str) -> str | None:
         },
         {"role": "user", "content": ja_name},
     ]
-    result = await chat_completion(messages, max_tokens=10, temperature=0.1)
+    result = await chat_completion(messages, max_tokens=10, temperature=0.1, priority=priority)
     if not result:
         return None
     en = result.strip().lower().split()[0]
     return en if en.isascii() and " " not in en and len(en) < 30 else None
 
 
-async def translate_tags(names: list[str]) -> dict[str, str]:
+async def translate_tags(names: list[str], priority: int | None = None) -> dict[str, str]:
     """Translate English tag names to Japanese using LLM with static fallback.
 
     Returns dict of {en_name: ja_name}.
@@ -103,7 +103,7 @@ async def translate_tags(names: list[str]) -> dict[str, str]:
         {"role": "user", "content": "\n".join(remaining)},
     ]
     max_tokens = min(len(remaining) * 20, 400)
-    result = await chat_completion(messages, max_tokens=max_tokens, temperature=0.1)
+    result = await chat_completion(messages, max_tokens=max_tokens, temperature=0.1, priority=priority)
     if result:
         for line in result.splitlines():
             line = line.strip()
@@ -120,6 +120,7 @@ async def suggest_tags(
     title: str,
     text: str,
     existing_tags: list[str] | None = None,
+    priority: int | None = None,
 ) -> list[tuple[str, str | None]]:
     """Suggest tags for an article.
 
@@ -135,7 +136,7 @@ async def suggest_tags(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(user_parts)},
     ]
-    result = await chat_completion(messages, max_tokens=60, temperature=0.1)
+    result = await chat_completion(messages, max_tokens=60, temperature=0.1, priority=priority)
     if not result:
         return []
     return _parse_tag_pairs(result)
