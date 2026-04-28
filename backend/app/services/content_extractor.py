@@ -79,9 +79,9 @@ def _find_yahoo_pickup_article_url(html_bytes: bytes) -> str | None:
     return None
 
 
-def _extract_from_bytes(content: bytes, url: str) -> str | None:
-    """Parse bytes with proper encoding detection and extract content."""
-    tree = trafilatura.load_html(content)
+def _extract_from_html(html: str | bytes, url: str) -> str | None:
+    """Parse HTML (text or bytes) and extract main content as HTML string."""
+    tree = trafilatura.load_html(html)
     if tree is None:
         return None
     result = trafilatura.extract(
@@ -112,6 +112,19 @@ def _extract_from_bytes(content: bytes, url: str) -> str | None:
     return result
 
 
+def _decoded_html(resp: httpx.Response) -> str | bytes:
+    """Return HTML decoded with the response's declared encoding when available.
+
+    trafilatura/lxml の自動検出は EUC-JP / Shift_JIS のページで誤判定して文字化け
+    することがある。HTTP レスポンスの Content-Type に charset がある場合は httpx
+    がそれに従って ``.text`` を返すため、テキストを優先して trafilatura に渡す。
+    宣言が無く検出にも失敗した場合のみ生バイトへフォールバックする。
+    """
+    if resp.charset_encoding:
+        return resp.text
+    return resp.content
+
+
 async def extract_content(url: str) -> str | None:
     """Fetch a URL and extract the main article text as HTML."""
     try:
@@ -135,7 +148,7 @@ async def extract_content(url: str) -> str | None:
                     except Exception as e:
                         logger.warning("Failed to fetch Yahoo article source %s: %s", article_url, e)
 
-            return _extract_from_bytes(resp.content, str(resp.url))
+            return _extract_from_html(_decoded_html(resp), str(resp.url))
 
     except Exception as e:
         logger.warning("Failed to fetch %s: %s", url, e)
