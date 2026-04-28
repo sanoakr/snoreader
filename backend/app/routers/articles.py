@@ -226,11 +226,16 @@ async def extract_article_content(
     if content:
         article.content = content
 
-        from app.ai.summarizer import summarize_article as _summarize
+        from app.ai.processor import summarize_and_tag
+        existing = await session.execute(select(Tag.name))
+        existing_names = list(existing.scalars())
         text = content or article.summary or ""
-        summary = await _summarize(article.title, text)
+        summary, pairs = await summarize_and_tag(article.title, text, existing_tags=existing_names)
         if summary:
             article.ai_summary = summary
+            if pairs:
+                import json as _json
+                article.tag_suggestions = _json.dumps([en for en, _ in pairs])
 
         await session.commit()
 

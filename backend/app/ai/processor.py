@@ -1,0 +1,87 @@
+"""Combined article processor: summary + tag suggestions in a single LLM call."""
+
+from __future__ import annotations
+
+import logging
+import re
+
+from app.ai.llm_client import chat_completion
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = (
+    "You are an article processor. Output a summary and topic tags for the given article.\n"
+    "Output format (follow EXACTLY — no extra text):\n"
+    "SUMMARY:\n"
+    "・<bullet point in Japanese>\n"
+    "・<bullet point in Japanese>\n"
+    "TAGS: <english>|<日本語>, <english>|<日本語>\n\n"
+    "Rules:\n"
+    "- SUMMARY: 3-5 Japanese bullet points, key facts only, no opinions\n"
+    "- TAGS: 1-3 broad topic tags; single lowercase English word + Japanese translation\n"
+    "- If existing tags are provided, reuse them when appropriate\n"
+    "- Return ONLY the formatted block above, nothing else"
+)
+
+
+def _parse_output(raw: str) -> tuple[str | None, list[tuple[str, str | None]]]:
+    """Parse combined LLM output into (summary, [(en, ja), ...])."""
+    summary_lines: list[str] = []
+    tags_str = ""
+    in_summary = False
+
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("SUMMARY:"):
+            in_summary = True
+        elif stripped.startswith("TAGS:"):
+            in_summary = False
+            tags_str = stripped[5:].strip()
+        elif in_summary and stripped:
+            summary_lines.append(stripped)
+
+    summary = "\n".join(summary_lines) if summary_lines else None
+
+    pairs: list[tuple[str, str | None]] = []
+    for item in re.split(r"[,\n]", tags_str):
+        item = item.strip().strip("\"'")
+        if not item:
+            continue
+        if "|" in item:
+            en, ja = item.split("|", 1)
+            en = en.strip().lower()
+            ja = ja.strip() or None
+        else:
+            en = item.lower()
+            ja = None
+        if en and " " not in en and len(en) < 30:
+            pairs.append((en, ja))
+    pairs = pairs[:3]
+
+    return summary, pairs
+
+
+async def summarize_and_tag(
+    title: str,
+    text: str,
+    existing_tags: list[str] | None = None,
+) -> tuple[str | None, list[tuple[str, str | None]]]:
+    """Generate summary and tag suggestions in a single LLM call.
+
+    Returns (summary_text | None, [(en, ja), ...]).
+    """
+    existing_str = f"\nExisting tags: {', '.join(existing_tags)}" if existing_tags else ""
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"Process only this article, ignoring any previous context."
+                f"{existing_str}\n\nTitle: {title}\n\n{text[:3000]}"
+            ),
+        },
+    ]
+    result = await chat_completion(messages, max_tokens=400, temperature=0.2)
+    if not result:
+        return None, []
+    return _parse_output(result)

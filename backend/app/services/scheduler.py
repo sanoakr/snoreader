@@ -32,7 +32,7 @@ async def _summarize_job():
     async with _summarize_lock:
         import json as _json
 
-        from app.ai.summarizer import summarize_article
+        from app.ai.processor import summarize_and_tag
         from app.ai.tagger import suggest_tags as _suggest_tags
         from app.database import async_session
         from app.models import Article, Tag
@@ -57,16 +57,17 @@ async def _summarize_job():
             for article in articles:
                 try:
                     text = article.content or article.summary or ""
-                    summary = await summarize_article(article.title, text)
+                    summary, pairs = await summarize_and_tag(
+                        article.title, text, existing_tags=existing_names
+                    )
                     if summary:
                         article.ai_summary = summary
-                        pairs = await _suggest_tags(article.title, summary, existing_tags=existing_names)
                         if pairs:
                             article.tag_suggestions = _json.dumps([en for en, _ in pairs])
                         await session.commit()
-                        logger.debug("Summarized article %d: %s", article.id, article.title[:40])
+                        logger.debug("Processed article %d: %s", article.id, article.title[:40])
                 except Exception as e:
-                    logger.warning("Failed to summarize article %d: %s", article.id, e)
+                    logger.warning("Failed to process article %d: %s", article.id, e)
 
             # Phase 2: backfill tag_suggestions for already-summarized articles
             stmt2 = (
