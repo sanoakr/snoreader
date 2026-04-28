@@ -100,8 +100,10 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
           );
           if (article.is_saved) {
             autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
+            setSuggestedTags(manual);
+          } else {
+            setSuggestedTags([...autoAdd, ...manual]);
           }
-          setSuggestedTags(manual);
         },
       });
     }
