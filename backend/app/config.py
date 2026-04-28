@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     llm_model: str = "prism-ml/Ternary-Bonsai-8B-mlx-2bit"
     llm_timeout: int = 120
 
-    summarize_interval_seconds: int = 30
-    summarize_batch_size: int = 10
+    summarize_interval_seconds: int = 60
+    summarize_batch_size: int = 3
 
     model_config = {"env_prefix": "SNOREADER_"}
 
