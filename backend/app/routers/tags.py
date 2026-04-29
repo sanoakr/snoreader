@@ -66,12 +66,32 @@ async def rename_tag(tag_id: int, body: TagUpdate, session: AsyncSession = Depen
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
 
+    input_name = body.name.strip()
+    if not input_name:
+        raise HTTPException(status_code=400, detail="Tag name cannot be empty")
+
+    # add_tag_to_article と同じ正規化: ASCII は lower、日本語は LLM で英訳
+    if input_name.isascii():
+        en_name = input_name.lower()
+        ja_name: str | None = None
+    else:
+        from app.ai.tagger import translate_to_english
+        from app.ai.task_queue import PRIORITY_FOREGROUND
+        ja_name = input_name
+        en_name = await translate_to_english(input_name, priority=PRIORITY_FOREGROUND)
+        if not en_name:
+            raise HTTPException(status_code=503, detail="LLM unavailable — cannot translate Japanese tag to English. Please enter an English tag name.")
+
+    # 正規化後に同名なら何もしない
+    if en_name == tag.name and (not ja_name or ja_name == tag.name_ja):
+        return TagOut.model_validate(tag)
+
     target = (await session.execute(
-        select(Tag).where(Tag.name == body.name, Tag.id != tag_id)
+        select(Tag).where(Tag.name == en_name, Tag.id != tag_id)
     )).scalar_one_or_none()
 
     if target:
-        # Merge: reassign source articles to target, skip duplicates
+        # マージ: source の関連を target に付け替え、重複はスキップ
         source_assocs = (await session.execute(
             select(ArticleTag).where(ArticleTag.tag_id == tag_id)
         )).scalars().all()
@@ -85,12 +105,17 @@ async def rename_tag(tag_id: int, body: TagUpdate, session: AsyncSession = Depen
                 await session.delete(assoc)
             else:
                 assoc.tag_id = target.id
+        # target に name_ja が無ければ source / 入力値から補う
+        if not target.name_ja:
+            target.name_ja = ja_name or tag.name_ja
         await session.delete(tag)
         await session.commit()
         await session.refresh(target)
         return TagOut.model_validate(target)
 
-    tag.name = body.name
+    tag.name = en_name
+    if ja_name:
+        tag.name_ja = ja_name
     await session.commit()
     await session.refresh(tag)
     return TagOut.model_validate(tag)
