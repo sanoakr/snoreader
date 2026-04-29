@@ -119,5 +119,12 @@ class ArticleChatRequest(BaseModel):
     history: list[ChatMessage] = []
 
 
+class ChatSource(BaseModel):
+    title: str
+    url: str
+
+
 class ArticleChatResponse(BaseModel):
     message: str
+    search_used: bool = False
+    sources: list[ChatSource] = []
