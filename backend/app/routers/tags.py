@@ -65,9 +65,31 @@ async def rename_tag(tag_id: int, body: TagUpdate, session: AsyncSession = Depen
     tag = await session.get(Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    dup = await session.execute(select(Tag).where(Tag.name == body.name, Tag.id != tag_id))
-    if dup.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Tag name already exists")
+
+    target = (await session.execute(
+        select(Tag).where(Tag.name == body.name, Tag.id != tag_id)
+    )).scalar_one_or_none()
+
+    if target:
+        # Merge: reassign source articles to target, skip duplicates
+        source_assocs = (await session.execute(
+            select(ArticleTag).where(ArticleTag.tag_id == tag_id)
+        )).scalars().all()
+        target_article_ids = set(
+            (await session.execute(
+                select(ArticleTag.article_id).where(ArticleTag.tag_id == target.id)
+            )).scalars().all()
+        )
+        for assoc in source_assocs:
+            if assoc.article_id in target_article_ids:
+                await session.delete(assoc)
+            else:
+                assoc.tag_id = target.id
+        await session.delete(tag)
+        await session.commit()
+        await session.refresh(target)
+        return TagOut.model_validate(target)
+
     tag.name = body.name
     await session.commit()
     await session.refresh(tag)
