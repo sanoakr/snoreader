@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAiStatus, useArticles, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
 import type { Article, ArticleFilters } from '../../types';
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -121,8 +123,13 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
         searchRef.current?.focus();
         break;
       }
+      case 'r': {
+        queryClient.invalidateQueries({ queryKey: ['articles'] });
+        queryClient.invalidateQueries({ queryKey: ['feeds'] });
+        break;
+      }
     }
-  }, [articles, selectedId, updateArticle]);
+  }, [articles, selectedId, updateArticle, queryClient]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
