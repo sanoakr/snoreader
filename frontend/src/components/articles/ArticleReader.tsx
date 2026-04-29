@@ -4,6 +4,7 @@ import { getArticle } from '../../api/client';
 import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useExtractContent } from '../../hooks/useArticles';
 import { Spinner } from '../common/Spinner';
 import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
+import { ArticleChatPanel } from './ArticleChatPanel';
 import type { TagSuggestion } from '../../types';
 
 interface Props {
@@ -347,6 +348,8 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
           </div>
         )}
       </article>
+
+      {aiAvailable && <ArticleChatPanel articleId={article.id} />}
 
       {/* Floating prev/next buttons (mobile only) */}
       {(onPrev || onNext) && (

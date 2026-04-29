@@ -64,3 +64,12 @@ export interface ArticleFilters {
   order?: string;
   recommended?: boolean;
 }
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatResponse {
+  message: string;
+}

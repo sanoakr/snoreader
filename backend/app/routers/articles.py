@@ -15,6 +15,8 @@ from app.config import settings
 from app.database import get_session
 from app.models import Article, ArticleTag, Feed, Tag
 from app.schemas import (
+    ArticleChatRequest,
+    ArticleChatResponse,
     ArticleDetail,
     ArticleOut,
     ArticleUpdate,
@@ -343,6 +345,51 @@ async def suggest_article_tags(
     if not pairs:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
     return [TagSuggestion(name=en, name_ja=ja) for en, ja in pairs]
+
+
+_CHAT_SYSTEM_PROMPT = (
+    "You are a helpful assistant answering questions about a specific news article. "
+    "Use ONLY the provided article content as context. If the answer is not in the "
+    "article, say so clearly. Answer in the user's language (Japanese if the user "
+    "writes in Japanese). Keep answers concise."
+)
+_CHAT_CONTEXT_LIMIT = 4000  # 記事本文をプロンプトに埋め込む際の文字数上限
+_CHAT_HISTORY_LIMIT = 10    # クライアント履歴の最大保持ターン数
+
+
+@router.post("/articles/{article_id}/chat", response_model=ArticleChatResponse)
+async def chat_about_article(
+    article_id: int,
+    body: ArticleChatRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Article-scoped Q&A. The article body is injected as system context."""
+    from app.ai.llm_client import chat_completion
+    from app.ai.task_queue import PRIORITY_FOREGROUND
+
+    article = await session.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # 本文ソース優先順: content > ai_summary > summary
+    context_text = (article.content or article.ai_summary or article.summary or "")[:_CHAT_CONTEXT_LIMIT]
+
+    system_content = (
+        f"{_CHAT_SYSTEM_PROMPT}\n\n"
+        f"Article title: {article.title}\n\n"
+        f"Article content:\n{context_text}"
+    )
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
+    for m in body.history[-_CHAT_HISTORY_LIMIT:]:
+        messages.append({"role": m.role, "content": m.content})
+    messages.append({"role": "user", "content": body.message})
+
+    reply = await chat_completion(
+        messages, max_tokens=512, temperature=0.3, priority=PRIORITY_FOREGROUND
+    )
+    if reply is None:
+        raise HTTPException(status_code=503, detail="LLM server unavailable")
+    return ArticleChatResponse(message=reply.strip())
 
 
 _BULK_TAG_BATCH = 10  # max articles per batch

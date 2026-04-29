@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as api from '../api/client';
-import type { ArticleFilters, PaginatedArticles } from '../types';
+import type { ArticleFilters, ChatMessage, PaginatedArticles } from '../types';
 
 const ARTICLES_LIMIT = 50;
 
@@ -80,6 +80,13 @@ export function useExtractContent() {
 export function useSuggestTags() {
   return useMutation({
     mutationFn: (id: number) => api.suggestTags(id),
+  });
+}
+
+export function useChatWithArticle() {
+  return useMutation({
+    mutationFn: ({ id, message, history }: { id: number; message: string; history: ChatMessage[] }) =>
+      api.chatWithArticle(id, message, history),
   });
 }
 

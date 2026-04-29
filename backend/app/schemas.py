@@ -1,5 +1,7 @@
 """Pydantic schemas for API request/response."""
 
+from typing import Literal
+
 from pydantic import BaseModel, HttpUrl
 
 
@@ -103,3 +105,19 @@ class PaginatedArticles(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+# --- Chat ---
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ArticleChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
+
+
+class ArticleChatResponse(BaseModel):
+    message: str
