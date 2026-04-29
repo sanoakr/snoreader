@@ -205,6 +205,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               article={article}
               isSelected={article.id === selectedId}
               onClick={() => setSelectedId(article.id)}
+              dimRead={!filters.is_saved}
             />
           ))}
           {(hasNextPage && !isSearching) && (
