@@ -82,11 +82,14 @@ async def translate_to_english(ja_name: str, priority: int | None = None) -> str
         },
         {"role": "user", "content": ja_name},
     ]
-    result = await chat_completion(messages, max_tokens=10, temperature=0.1, priority=priority)
+    result = await chat_completion(messages, max_tokens=20, temperature=0.1, priority=priority)
     if not result:
         return None
-    en = result.strip().lower().split()[0]
-    return en if en.isascii() and " " not in en and len(en) < 30 else None
+    # Extract the first ASCII token — models sometimes echo the Japanese alongside the translation
+    for token in result.strip().lower().split():
+        if token.isascii() and _VALID_EN_TAG.match(token):
+            return token
+    return None
 
 
 async def translate_tags(names: list[str], priority: int | None = None) -> dict[str, str]:

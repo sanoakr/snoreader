@@ -113,8 +113,9 @@ async def add_tag_to_article(
     else:
         # Japanese input: generate English name via LLM and store as name
         from app.ai.tagger import translate_to_english
+        from app.ai.task_queue import PRIORITY_FOREGROUND
         ja_name = input_name
-        en_name = await translate_to_english(input_name)
+        en_name = await translate_to_english(input_name, priority=PRIORITY_FOREGROUND)
         if not en_name:
             raise HTTPException(status_code=503, detail="LLM unavailable — cannot translate Japanese tag to English. Please enter an English tag name.")
 
