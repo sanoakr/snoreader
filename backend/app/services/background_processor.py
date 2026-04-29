@@ -12,15 +12,63 @@ import asyncio
 import logging
 import time
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
 _SLEEP_IDLE = 10
 _SKIP_DURATION = 300  # seconds to skip an article after failure
+_SHORT_CONTENT_THRESHOLD = 300  # summary shorter than this triggers auto-extraction
 
 _processor_task: asyncio.Task[None] | None = None
 _skip_until: dict[int, float] = {}
+
+
+async def _extract_one() -> bool:
+    """Phase 0: auto-extract full content for articles with short/truncated summaries.
+
+    Runs independently of LLM availability (pure HTTP + trafilatura).
+    """
+    from app.database import async_session
+    from app.models import Article
+    from app.services.content_extractor import extract_content
+
+    now = time.monotonic()
+    skip_ids = [aid for aid, until in _skip_until.items() if until > now]
+
+    async with async_session() as session:
+        stmt = (
+            select(Article)
+            .where(
+                Article.content.is_(None),
+                func.coalesce(func.length(Article.summary), 0) < _SHORT_CONTENT_THRESHOLD,
+            )
+            .order_by(Article.is_saved.desc(), Article.is_read.asc(), Article.published_at.desc())
+        )
+        if skip_ids:
+            stmt = stmt.where(Article.id.not_in(skip_ids))
+        stmt = stmt.limit(1)
+        article = (await session.execute(stmt)).scalars().first()
+        if not article:
+            return False
+        article_id = article.id
+        url = article.url
+
+    content = await extract_content(url)
+
+    async with async_session() as session:
+        article = await session.get(Article, article_id)
+        if not article:
+            return True
+        if content:
+            article.content = content
+            await session.commit()
+            logger.debug("Auto-extracted content for article %d", article_id)
+        else:
+            # Mark as skipped so we don't retry immediately
+            _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+
+    return True
 
 
 async def _process_one() -> bool:
@@ -123,9 +171,14 @@ async def _run() -> None:
 
     while True:
         try:
+            # Phase 0: content extraction — runs regardless of LLM availability
+            if await _extract_one():
+                continue
+
             if not await is_available():
                 await asyncio.sleep(_SLEEP_IDLE * 3)
                 continue
+
             did_work = await _process_one()
             if not did_work:
                 await asyncio.sleep(_SLEEP_IDLE)
