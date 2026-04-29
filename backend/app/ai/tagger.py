@@ -11,15 +11,17 @@ from app.ai.llm_client import chat_completion
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "You are a content tagger. Suggest 1-3 broad topic tags for an article. "
+    "You are a content tagger. Suggest 1-3 specific topic tags for an article. "
     "Rules:\n"
     "- The TITLE is the most important signal — base tags primarily on the title\n"
     "- Use the body text only as secondary context\n"
     "- Always use English as the primary tag (single lowercase word, no spaces)\n"
     "- Also provide a Japanese translation for each tag\n"
     "- Format: english|日本語 for each tag, comma-separated\n"
-    "- Examples: ai|AI, security|セキュリティ, python|Python, politics|政治\n"
-    "- Use broad categories, not specific details\n"
+    "- Examples: security|セキュリティ, python|Python, politics|政治, climate|気候\n"
+    "- Choose the MOST SPECIFIC accurate tag, not a broad umbrella\n"
+    "- ONLY use 'ai' if the article is primarily about AI/ML technology itself\n"
+    "- ONLY use 'technology' or 'news' if no more specific tag applies\n"
     "- If existing tags are listed, reuse them when appropriate\n"
     "Return ONLY the comma-separated pairs, nothing else."
 )

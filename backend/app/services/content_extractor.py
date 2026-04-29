@@ -90,8 +90,66 @@ def _find_yahoo_next_url(html_bytes: bytes) -> str | None:
     return None
 
 
+def _is_matome_blog(html_bytes: bytes) -> bool:
+    """Livedoor Blog まとめブログパターン (スレッド書き込み列挙) を検出する。"""
+    return (b'id="comments-list"' in html_bytes
+            and b'class="comment-set"' in html_bytes)
+
+
+def _extract_matome_posts(html_bytes: bytes, base_url: str) -> str | None:
+    """Livedoor Blog まとめ記事の導入文 + スレッド書き込みを HTML で返す。"""
+    try:
+        from lxml import html as lxml_html
+        from lxml.html import tostring as lxml_tostring
+
+        tree = lxml_html.fromstring(html_bytes)
+        tree.make_links_absolute(base_url)
+        parts: list[str] = []
+
+        # 導入文
+        intro_nodes = tree.xpath('//div[contains(@class,"article-body-inner")]')
+        if intro_nodes:
+            intro_html = lxml_tostring(intro_nodes[0], encoding="unicode", method="html")
+            intro_html = re.sub(r"^<div[^>]*>", '<div class="matome-intro">', intro_html, count=1)
+            parts.append(intro_html)
+
+        # スレッド書き込み
+        post_items: list[str] = []
+        for div in tree.xpath('//div[starts-with(@id,"com_")]'):
+            div_id = div.get("id", "")
+            post_num = div_id[4:] if div_id.startswith("com_") else ""
+            for cs in div.xpath('.//li[contains(@class,"comment-body")]'):
+                body_html = lxml_tostring(cs, encoding="unicode", method="html")
+                body_inner = re.sub(r"^<li[^>]*>|</li>\s*$", "", body_html.strip())
+                post_items.append(
+                    f'<div class="thread-post">'
+                    f'<span class="post-num">{post_num}</span>'
+                    f'<div class="post-body">{body_inner}</div>'
+                    f'</div>'
+                )
+
+        if post_items:
+            parts.append('<div class="thread-posts">' + "".join(post_items) + "</div>")
+
+        if not parts:
+            return None
+        return _fix_html("\n".join(parts), base_url=base_url)
+
+    except Exception as e:
+        logger.warning("まとめブログ抽出失敗 %s: %s", base_url, e)
+        return None
+
+
 def _extract_from_html(html: str | bytes, url: str) -> str | None:
     """Parse HTML (text or bytes) and extract main content as HTML string."""
+    html_bytes = html if isinstance(html, bytes) else html.encode()
+
+    # まとめブログパターン → カスタム抽出
+    if _is_matome_blog(html_bytes):
+        result = _extract_matome_posts(html_bytes, url)
+        if result:
+            return result
+
     tree = trafilatura.load_html(html)
     if tree is None:
         return None

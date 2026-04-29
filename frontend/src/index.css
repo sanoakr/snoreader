@@ -46,3 +46,38 @@ body {
 .prose blockquote + blockquote {
   margin-top: 0.25em;
 }
+
+/* まとめブログ スレッド書き込み */
+.prose .thread-posts {
+  margin-top: 1em;
+  border-top: 1px solid #e2e8f0;
+}
+
+.dark .prose .thread-posts {
+  border-top-color: #334155;
+}
+
+.prose .thread-post {
+  display: flex;
+  gap: 0.5em;
+  padding: 0.3em 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.875em;
+  line-height: 1.5;
+}
+
+.dark .prose .thread-post {
+  border-bottom-color: #1e293b;
+}
+
+.prose .post-num {
+  color: #94a3b8;
+  min-width: 2em;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose .post-body {
+  flex: 1;
+}

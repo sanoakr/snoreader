@@ -24,7 +24,8 @@ _SYSTEM_PROMPT = (
     "Rules:\n"
     "- SUMMARY: 3-5 Japanese bullet points, key facts only, no opinions\n"
     "- SUMMARY bullets start with '・' and contain ONLY Japanese text — no English|Japanese pairs\n"
-    "- TAGS: 1-3 broad topic tags; single lowercase English word (or hyphenated) + Japanese translation\n"
+    "- TAGS: 1-3 specific topic tags; single lowercase English word (or hyphenated) + Japanese translation\n"
+    "- Choose the most specific accurate tag — only use 'ai', 'technology', or 'news' if that is the article's primary subject\n"
     "- If existing tags are provided, reuse them when appropriate\n"
     "- Return ONLY the formatted block above, nothing else"
 )

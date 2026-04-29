@@ -1,5 +1,6 @@
 """Article list, detail, state update, and search endpoints."""
 
+import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -94,6 +95,13 @@ async def get_recommended_articles(
     if not tag_freq:
         return PaginatedArticles(items=[], total=0, offset=offset, limit=limit)
 
+    # Total saved articles — IDF denominator to penalize high-coverage tags
+    n_saved: int = (
+        await session.scalar(
+            select(func.count()).select_from(Article).where(Article.is_saved == True)  # noqa: E712
+        )
+    ) or 1
+
     # Unread unsaved articles with pre-computed tag suggestions
     stmt = (
         select(Article, Feed.title.label("feed_title"))
@@ -111,7 +119,11 @@ async def get_recommended_articles(
     for row in rows:
         article, feed_title = row[0], row[1]
         suggestions = set(_json.loads(article.tag_suggestions))
-        score = sum(tag_freq.get(t, 0) for t in suggestions if t in tag_freq)
+        score = sum(
+            math.log1p(tag_freq[t]) * math.log(n_saved / tag_freq[t] + 1)
+            for t in suggestions
+            if t in tag_freq
+        )
         if score > 0:
             scored.append((score, article, feed_title))
 
