@@ -4,9 +4,12 @@ import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import Integer, case, func, select, text
+from sqlalchemy import Integer, case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+# 保存記事の 50% 以上に付与されたタグは過剰カバレッジとみなし、Recommend スコアから除外する
+_HIGH_COVERAGE_THRESHOLD = 0.5
 
 from app.config import settings
 from app.database import get_session
@@ -102,6 +105,12 @@ async def get_recommended_articles(
         )
     ) or 1
 
+    # カバレッジが閾値を超えるタグは除外（例: 全保存記事の 50% 超に付いているタグ）
+    coverage_cutoff = n_saved * _HIGH_COVERAGE_THRESHOLD
+    scoreable_freq = {t: f for t, f in tag_freq.items() if f <= coverage_cutoff}
+    if not scoreable_freq:
+        return PaginatedArticles(items=[], total=0, offset=offset, limit=limit)
+
     # Unread unsaved articles with pre-computed tag suggestions
     stmt = (
         select(Article, Feed.title.label("feed_title"))
@@ -115,14 +124,14 @@ async def get_recommended_articles(
     rows = (await session.execute(stmt)).all()
 
     # Frequency-weighted score
-    scored: list[tuple[int, Article, str]] = []
+    scored: list[tuple[float, Article, str]] = []
     for row in rows:
         article, feed_title = row[0], row[1]
         suggestions = set(_json.loads(article.tag_suggestions))
         score = sum(
-            math.log1p(tag_freq[t]) * math.log(n_saved / tag_freq[t] + 1)
+            math.log1p(scoreable_freq[t]) * math.log(n_saved / scoreable_freq[t] + 1)
             for t in suggestions
-            if t in tag_freq
+            if t in scoreable_freq
         )
         if score > 0:
             scored.append((score, article, feed_title))
@@ -388,6 +397,24 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
                 if not dup.scalar_one_or_none():
                     session.add(ArticleTag(article_id=article_id, tag_id=tag.id))
             await session.commit()
+
+
+@router.post("/articles/regenerate-tag-suggestions", response_model=dict)
+async def regenerate_tag_suggestions(
+    session: AsyncSession = Depends(get_session),
+):
+    """既存の tag_suggestions を NULL に戻し、background processor の Phase 2 に再生成させる。
+
+    Issue #11: 初期プロンプトで付与された汎用タグ (ai/technology/news など) を
+    修正後のプロンプトで生成し直すための管理用エンドポイント。
+    """
+    result = await session.execute(
+        update(Article)
+        .where(Article.tag_suggestions.isnot(None))
+        .values(tag_suggestions=None)
+    )
+    await session.commit()
+    return {"cleared": result.rowcount or 0}
 
 
 @router.get("/ai/status")
