@@ -38,6 +38,8 @@ export function useUpdateArticle() {
         },
       );
       qc.invalidateQueries({ queryKey: ['feeds'] });
+      qc.invalidateQueries({ queryKey: ['recommended-count'] });
+      qc.invalidateQueries({ queryKey: ['saved-count'] });
       qc.invalidateQueries({ queryKey: ['article', id] });
     },
   });
