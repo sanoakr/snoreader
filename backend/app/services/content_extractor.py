@@ -17,7 +17,8 @@ _ATTR_ALT = re.compile(r'\balt="([^"]*)"')
 _NESTED_PRE = re.compile(r'<pre>\s*<pre>(.*?)</pre>\s*</pre>', re.DOTALL)
 
 _YAHOO_PICKUP_RE = re.compile(r'https?://news\.yahoo\.co\.jp/pickup/')
-_YAHOO_ARTICLE_RE = re.compile(r'https?://news\.yahoo\.co\.jp/articles/')
+# Match canonical article URLs only — exclude sub-paths like /articles/HASH/images/000
+_YAHOO_ARTICLE_RE = re.compile(r'^https?://news\.yahoo\.co\.jp/articles/[^/?#]+/?(?:[?#].*)?$')
 # Matches URLs that should NOT be treated as the target article
 _YAHOO_IGNORE_RE = re.compile(
     r'yimg\.jp|x\.com|twitter\.com|facebook\.com|instagram\.com|lycorp\.co\.jp|privacy',
@@ -138,9 +139,8 @@ def _decoded_html(resp: httpx.Response) -> str | bytes:
 async def extract_content(url: str) -> str | None:
     """Fetch a URL and extract the main article text as HTML.
 
-    For Yahoo pickup pages the chain is:
-      pickup/... → articles/... → (optional external source)
-    We follow up to 2 hops so both legs are handled.
+    Yahoo pickup pages link to /articles/<hash>, where the full body lives.
+    We follow that single hop, then extract directly.
     """
     try:
         async with httpx.AsyncClient(
@@ -152,21 +152,16 @@ async def extract_content(url: str) -> str | None:
             resp = await client.get(url)
             resp.raise_for_status()
 
-            # Follow Yahoo redirect chain: pickup → articles → external (max 2 hops)
-            for _ in range(2):
-                final_url = str(resp.url)
-                if not (_YAHOO_PICKUP_RE.search(final_url) or _YAHOO_ARTICLE_RE.search(final_url)):
-                    break
+            # One hop: pickup → articles (or external source as legacy fallback)
+            if _YAHOO_PICKUP_RE.search(str(resp.url)):
                 next_url = _find_yahoo_next_url(resp.content)
-                if not next_url or next_url == final_url:
-                    break
-                logger.info("Yahoo: following %s → %s", final_url, next_url)
-                try:
-                    resp = await client.get(next_url)
-                    resp.raise_for_status()
-                except Exception as e:
-                    logger.warning("Failed to fetch %s: %s", next_url, e)
-                    break
+                if next_url and next_url != str(resp.url):
+                    logger.info("Yahoo: following %s → %s", resp.url, next_url)
+                    try:
+                        resp = await client.get(next_url)
+                        resp.raise_for_status()
+                    except Exception as e:
+                        logger.warning("Failed to fetch %s: %s", next_url, e)
 
             return _extract_from_html(_decoded_html(resp), str(resp.url))
 
