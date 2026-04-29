@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -92,6 +92,18 @@ export function extractArticleContent(id: number): Promise<ArticleDetail> {
 
 export function suggestTags(id: number): Promise<TagSuggestion[]> {
   return fetchJSON(`${BASE}/articles/${id}/suggest-tags`, { method: 'POST' });
+}
+
+export function chatWithArticle(
+  id: number,
+  message: string,
+  history: ChatMessage[],
+): Promise<ChatResponse> {
+  return fetchJSON(`${BASE}/articles/${id}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history }),
+  });
 }
 
 export interface AiStatus {
