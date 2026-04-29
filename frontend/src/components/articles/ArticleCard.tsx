@@ -5,6 +5,7 @@ interface Props {
   article: Article;
   isSelected: boolean;
   onClick: () => void;
+  dimRead?: boolean;
 }
 
 function timeAgo(dateStr: string | null): string {
@@ -18,7 +19,7 @@ function timeAgo(dateStr: string | null): string {
   return `${days}d`;
 }
 
-export function ArticleCard({ article, isSelected, onClick }: Props) {
+export function ArticleCard({ article, isSelected, onClick, dimRead = true }: Props) {
   const updateArticle = useUpdateArticle();
 
   const toggleSaved = (e: React.MouseEvent) => {
@@ -32,7 +33,7 @@ export function ArticleCard({ article, isSelected, onClick }: Props) {
       onClick={onClick}
       className={`flex gap-3 p-3 cursor-pointer border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
         isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-      } ${article.is_read ? 'opacity-60' : ''}`}
+      } ${dimRead && article.is_read ? 'opacity-60' : ''}`}
     >
       {/* Thumbnail */}
       {article.image_url && (
@@ -48,7 +49,7 @@ export function ArticleCard({ article, isSelected, onClick }: Props) {
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <h3 className={`text-sm leading-snug line-clamp-2 ${article.is_read ? '' : 'font-semibold text-gray-900 dark:text-gray-100'}`}>
+          <h3 className={`text-sm leading-snug line-clamp-2 ${!dimRead || !article.is_read ? 'font-semibold text-gray-900 dark:text-gray-100' : ''}`}>
             {article.title}
           </h3>
           <button

@@ -131,6 +131,9 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
 
   useEffect(() => {
     if (selectedId != null) {
+      // On mobile the reader overlay covers the list; skip scrollIntoView to
+      // avoid iOS Safari triggering unintended window scroll through the overlay
+      if (window.innerWidth < 768) return;
       const el = document.querySelector(`[data-article-id="${selectedId}"]`);
       el?.scrollIntoView({ block: 'nearest' });
     }
@@ -154,7 +157,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
             className="w-full px-2 py-1.5 text-sm border rounded dark:bg-gray-800 dark:border-gray-600"
           />
           <div className="flex items-center gap-1.5 flex-wrap">
-            {!filters.recommended && (
+            {!filters.recommended && !filters.is_saved && (
               <>
                 <button onClick={() => onFilterChange({ ...filters, is_read: false })} className={filterBtnClass(filters.is_read === false)}>Unread</button>
                 <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
@@ -182,7 +185,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               >
                 #{selectedTag.name} を削除
               </button>
-            ) : (
+            ) : !filters.is_saved && (
               <button onClick={() => markAllRead.mutate(filters.feed_id)} disabled={markAllRead.isPending} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">
                 Mark all read
               </button>
@@ -202,6 +205,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               article={article}
               isSelected={article.id === selectedId}
               onClick={() => setSelectedId(article.id)}
+              dimRead={!filters.is_saved}
             />
           ))}
           {(hasNextPage && !isSearching) && (
