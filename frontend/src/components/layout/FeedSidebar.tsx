@@ -106,7 +106,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, tag_id: undefined, recommended: undefined })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, recommended: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.is_saved === true && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
