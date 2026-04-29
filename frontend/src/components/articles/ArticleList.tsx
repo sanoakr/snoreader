@@ -124,8 +124,9 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
         break;
       }
       case 'r': {
-        queryClient.invalidateQueries({ queryKey: ['articles'] });
-        queryClient.invalidateQueries({ queryKey: ['feeds'] });
+        e.preventDefault();
+        queryClient.refetchQueries({ queryKey: ['articles'] });
+        queryClient.refetchQueries({ queryKey: ['feeds'] });
         break;
       }
     }
