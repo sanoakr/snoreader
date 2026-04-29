@@ -20,6 +20,7 @@ from app.schemas import (
     ArticleDetail,
     ArticleOut,
     ArticleUpdate,
+    ChatSource,
     MarkAllReadRequest,
     PaginatedArticles,
     TagSuggestion,
@@ -350,8 +351,14 @@ async def suggest_article_tags(
 _CHAT_SYSTEM_PROMPT = (
     "You are a helpful assistant answering questions about a specific news article. "
     "Use ONLY the provided article content as context. If the answer is not in the "
-    "article, say so clearly. Answer in the user's language (Japanese if the user "
-    "writes in Japanese). Keep answers concise."
+    "article, say so clearly.\n"
+    "Rules:\n"
+    "- Answer in conversational prose (complete sentences), NOT bullet points or lists, "
+    "unless the user explicitly asks for a list.\n"
+    "- Do NOT output template headers like 'SUMMARY:', 'TAGS:', or similar.\n"
+    "- Do NOT start lines with '・', '-', '*', or numbered markers.\n"
+    "- Answer in the user's language (Japanese if the user writes in Japanese).\n"
+    "- Keep answers concise — 1-3 short paragraphs maximum."
 )
 _CHAT_CONTEXT_LIMIT = 4000  # 記事本文をプロンプトに埋め込む際の文字数上限
 _CHAT_HISTORY_LIMIT = 10    # クライアント履歴の最大保持ターン数
@@ -363,9 +370,10 @@ async def chat_about_article(
     body: ArticleChatRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """Article-scoped Q&A. The article body is injected as system context."""
+    """Article-scoped Q&A. Optionally performs a web search when the user asks for it."""
     from app.ai.llm_client import chat_completion
     from app.ai.task_queue import PRIORITY_FOREGROUND
+    from app.services import web_search
 
     article = await session.get(Article, article_id)
     if not article:
@@ -379,6 +387,24 @@ async def chat_about_article(
         f"Article title: {article.title}\n\n"
         f"Article content:\n{context_text}"
     )
+
+    # Web 検索トリガー判定 → ヒットすればクエリを記事タイトル + ユーザー発言で投げる
+    search_used = False
+    sources: list[ChatSource] = []
+    if web_search.needs_web_search(body.message):
+        # 検索意図のときは記事タイトルを混ぜない（ユーザーが記事外の話題を調べたがっていることが多い）
+        results = await web_search.search(body.message)
+        if results:
+            search_used = True
+            sources = [ChatSource(title=r["title"], url=r["url"]) for r in results]
+            system_content += (
+                "\n\n"
+                "Additional web search results (use these to supplement the article "
+                "when the answer is not in the article itself). Cite sources inline by "
+                "the bracketed number when you use them:\n\n"
+                f"{web_search.format_results_for_llm(results)}"
+            )
+
     messages: list[dict[str, str]] = [{"role": "system", "content": system_content}]
     for m in body.history[-_CHAT_HISTORY_LIMIT:]:
         messages.append({"role": m.role, "content": m.content})
@@ -389,7 +415,11 @@ async def chat_about_article(
     )
     if reply is None:
         raise HTTPException(status_code=503, detail="LLM server unavailable")
-    return ArticleChatResponse(message=reply.strip())
+    return ArticleChatResponse(
+        message=reply.strip(),
+        search_used=search_used,
+        sources=sources,
+    )
 
 
 _BULK_TAG_BATCH = 10  # max articles per batch

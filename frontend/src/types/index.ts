@@ -70,6 +70,13 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface ChatSource {
+  title: string;
+  url: string;
+}
+
 export interface ChatResponse {
   message: string;
+  search_used: boolean;
+  sources: ChatSource[];
 }

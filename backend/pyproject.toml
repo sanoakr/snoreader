@@ -1,6 +1,6 @@
 [project]
 name = "snoreader"
-version = "0.6.0"
+version = "0.6.1"
 description = "Self-hosted RSS reader"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28",
     "python-multipart>=0.0.20",
     "greenlet>=3.0",
+    "ddgs>=9.0",
 ]
 
 [project.optional-dependencies]
