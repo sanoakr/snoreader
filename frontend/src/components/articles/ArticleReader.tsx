@@ -49,7 +49,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
     }
   }, [article?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset scroll position on article change
+  // Scroll to top on article change (iOS Safari needs explicit scrollTop reset)
   useEffect(() => {
     containerRef.current?.scrollTo(0, 0);
   }, [articleId]);
