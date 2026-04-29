@@ -17,8 +17,10 @@ _ATTR_ALT = re.compile(r'\balt="([^"]*)"')
 _NESTED_PRE = re.compile(r'<pre>\s*<pre>(.*?)</pre>\s*</pre>', re.DOTALL)
 
 _YAHOO_PICKUP_RE = re.compile(r'https?://news\.yahoo\.co\.jp/pickup/')
+_YAHOO_ARTICLE_RE = re.compile(r'https?://news\.yahoo\.co\.jp/articles/')
+# Matches URLs that should NOT be treated as the target article
 _YAHOO_IGNORE_RE = re.compile(
-    r'yahoo|yimg\.jp|x\.com|twitter\.com|facebook\.com|instagram\.com|lycorp\.co\.jp|privacy',
+    r'yimg\.jp|x\.com|twitter\.com|facebook\.com|instagram\.com|lycorp\.co\.jp|privacy',
     re.IGNORECASE,
 )
 
@@ -65,13 +67,21 @@ def _fix_html(html: str, base_url: str = "") -> str:
     return html
 
 
-def _find_yahoo_pickup_article_url(html_bytes: bytes) -> str | None:
-    """Extract the external article link from a Yahoo pickup page."""
+def _find_yahoo_next_url(html_bytes: bytes) -> str | None:
+    """Find the next URL to follow from a Yahoo pickup or articles page.
+
+    Priority:
+    1. Yahoo article page (/articles/) — pickup pages link here
+    2. External source URL — articles pages may link to the original publisher
+    """
     try:
         from lxml import html as lxml_html
         tree = lxml_html.fromstring(html_bytes)
-        for a in tree.xpath('//a[@href]'):
-            href = a.get('href', '')
+        hrefs = [a.get('href', '') for a in tree.xpath('//a[@href]')]
+        for href in hrefs:
+            if _YAHOO_ARTICLE_RE.match(href):
+                return href
+        for href in hrefs:
             if href.startswith('http') and not _YAHOO_IGNORE_RE.search(href):
                 return href
     except Exception:
@@ -126,7 +136,12 @@ def _decoded_html(resp: httpx.Response) -> str | bytes:
 
 
 async def extract_content(url: str) -> str | None:
-    """Fetch a URL and extract the main article text as HTML."""
+    """Fetch a URL and extract the main article text as HTML.
+
+    For Yahoo pickup pages the chain is:
+      pickup/... → articles/... → (optional external source)
+    We follow up to 2 hops so both legs are handled.
+    """
     try:
         async with httpx.AsyncClient(
             timeout=30,
@@ -137,16 +152,21 @@ async def extract_content(url: str) -> str | None:
             resp = await client.get(url)
             resp.raise_for_status()
 
-            # Yahoo pickup pages link to the actual article on an external site
-            if _YAHOO_PICKUP_RE.search(str(resp.url)):
-                article_url = _find_yahoo_pickup_article_url(resp.content)
-                if article_url:
-                    logger.info("Yahoo pickup: following external link %s", article_url)
-                    try:
-                        resp = await client.get(article_url)
-                        resp.raise_for_status()
-                    except Exception as e:
-                        logger.warning("Failed to fetch Yahoo article source %s: %s", article_url, e)
+            # Follow Yahoo redirect chain: pickup → articles → external (max 2 hops)
+            for _ in range(2):
+                final_url = str(resp.url)
+                if not (_YAHOO_PICKUP_RE.search(final_url) or _YAHOO_ARTICLE_RE.search(final_url)):
+                    break
+                next_url = _find_yahoo_next_url(resp.content)
+                if not next_url or next_url == final_url:
+                    break
+                logger.info("Yahoo: following %s → %s", final_url, next_url)
+                try:
+                    resp = await client.get(next_url)
+                    resp.raise_for_status()
+                except Exception as e:
+                    logger.warning("Failed to fetch %s: %s", next_url, e)
+                    break
 
             return _extract_from_html(_decoded_html(resp), str(resp.url))
 
