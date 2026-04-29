@@ -60,8 +60,11 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   };
 
   const handleRenameSubmit = (tagId: number) => {
-    if (!editingTagName.trim()) { setEditingTagId(null); return; }
-    renameTag.mutate({ id: tagId, name: editingTagName.trim() }, {
+    const newName = editingTagName.trim();
+    if (!newName) { setEditingTagId(null); return; }
+    const existing = tags?.find(t => t.name.toLowerCase() === newName.toLowerCase() && t.id !== tagId);
+    if (existing && !confirm(`Tag "${existing.name}" already exists — merge into it?`)) return;
+    renameTag.mutate({ id: tagId, name: newName }, {
       onSuccess: () => setEditingTagId(null),
     });
   };
