@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAiStatus, useArticles, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
@@ -20,6 +20,8 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Keeps the selected article visible across background refetches (e.g. in Unread view)
+  const pinnedArticleRef = useRef<Article | null>(null);
 
   const {
     data,
@@ -50,9 +52,24 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
     ? (searchResults.data?.total ?? 0)
     : (data?.pages[0]?.total ?? 0);
 
-  // Reset scroll on filter/search change
+  // When a background refetch removes the selected article (e.g. Unread view after mark-as-read),
+  // keep it visible by prepending the pinned copy.
+  const displayArticles = useMemo(() => {
+    const pinned = pinnedArticleRef.current;
+    if (!pinned || !selectedId || pinned.id !== selectedId) return articles;
+    const freshVersion = articles.find(a => a.id === pinned.id);
+    if (freshVersion) {
+      // Update pin with fresh data for next time
+      pinnedArticleRef.current = freshVersion;
+      return articles;
+    }
+    return [pinned, ...articles];
+  }, [articles, selectedId]);
+
+  // Reset scroll on filter/search change and clear pinned article
   useEffect(() => {
     listRef.current?.scrollTo(0, 0);
+    pinnedArticleRef.current = null;
   }, [filters, searchQuery]);
 
   // Infinite scroll via IntersectionObserver
@@ -68,27 +85,27 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, isSearching]);
 
-  const currentIndex = articles.findIndex(a => a.id === selectedId);
+  const currentIndex = displayArticles.findIndex(a => a.id === selectedId);
   const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex >= 0 && currentIndex < articles.length - 1;
+  const hasNext = currentIndex >= 0 && currentIndex < displayArticles.length - 1;
 
   const goNext = useCallback((idx: number) => {
-    const next = idx < articles.length - 1 ? idx + 1 : idx;
-    if (next === -1 && articles.length > 0) setSelectedId(articles[0].id);
-    else if (articles[next]) setSelectedId(articles[next].id);
-  }, [articles]);
+    const next = idx < displayArticles.length - 1 ? idx + 1 : idx;
+    if (next === -1 && displayArticles.length > 0) setSelectedId(displayArticles[0].id);
+    else if (displayArticles[next]) setSelectedId(displayArticles[next].id);
+  }, [displayArticles]);
 
   const goPrev = useCallback((idx: number) => {
     const prev = idx > 0 ? idx - 1 : 0;
-    if (articles[prev]) setSelectedId(articles[prev].id);
-  }, [articles]);
+    if (displayArticles[prev]) setSelectedId(displayArticles[prev].id);
+  }, [displayArticles]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
 
-    const currentIndex = articles.findIndex(a => a.id === selectedId);
+    const currentIndex = displayArticles.findIndex(a => a.id === selectedId);
 
     switch (e.key) {
       case 'j':
@@ -105,7 +122,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
       }
       case 's': {
         if (selectedId != null) {
-          const article = articles.find(a => a.id === selectedId);
+          const article = displayArticles.find(a => a.id === selectedId);
           if (article) updateArticle.mutate({ id: article.id, data: { is_saved: !article.is_saved } });
         }
         break;
@@ -113,7 +130,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
       case 'o':
       case 'Enter': {
         if (selectedId != null) {
-          const article = articles.find(a => a.id === selectedId);
+          const article = displayArticles.find(a => a.id === selectedId);
           if (article) window.open(article.url, '_blank');
         }
         break;
@@ -130,7 +147,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
         break;
       }
     }
-  }, [articles, selectedId, updateArticle, queryClient]);
+  }, [displayArticles, selectedId, updateArticle, queryClient]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -207,12 +224,15 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
           {!isLoading && articles.length === 0 && (
             <p className="p-4 text-sm text-gray-400">No articles found</p>
           )}
-          {articles.map((article) => (
+          {displayArticles.map((article) => (
             <ArticleCard
               key={article.id}
               article={article}
               isSelected={article.id === selectedId}
-              onClick={() => setSelectedId(article.id)}
+              onClick={() => {
+                pinnedArticleRef.current = article;
+                setSelectedId(article.id);
+              }}
               dimRead={!filters.is_saved}
             />
           ))}
