@@ -18,6 +18,11 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
+  // Stable refs so the swipe effect only attaches once; always reads latest callbacks
+  const onNextRef = useRef(onNext);
+  const onPrevRef = useRef(onPrev);
+  useEffect(() => { onNextRef.current = onNext; }, [onNext]);
+  useEffect(() => { onPrevRef.current = onPrev; }, [onPrev]);
   const summarizeTried = useRef(false);
   const suggestTried = useRef(false);
   const { data: article, isLoading } = useQuery({
@@ -54,7 +59,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
     containerRef.current?.scrollTo(0, 0);
   }, [articleId]);
 
-  // Swipe navigation (mobile)
+  // Swipe navigation (mobile) — runs once on mount; reads callbacks via stable refs
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -66,8 +71,8 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
       const dx = e.changedTouches[0].clientX - touchStartX.current;
       const dy = e.changedTouches[0].clientY - touchStartY.current;
       if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
-      if (dx < 0) onNext?.();
-      else onPrev?.();
+      if (dx < 0) onNextRef.current?.();
+      else onPrevRef.current?.();
     };
     el.addEventListener('touchstart', onStart, { passive: true });
     el.addEventListener('touchend', onEnd, { passive: true });
@@ -75,7 +80,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchend', onEnd);
     };
-  }, [onNext, onPrev]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-generate AI summary if not yet available
   useEffect(() => {
