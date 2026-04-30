@@ -349,13 +349,16 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
         )}
       </article>
 
-      {/* Prev/next buttons — bottom-right of article body (mobile only, above chat panel) */}
+      {/* Floating prev/next buttons — mobile only, pinned above the chat panel */}
       {(onPrev || onNext) && (
-        <div className="md:hidden flex justify-end gap-2 mt-6 pb-2">
+        <div
+          className="md:hidden fixed right-3 flex flex-col gap-2 z-20"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 4rem)' }}
+        >
           <button
             onClick={onPrev}
             disabled={!onPrev}
-            className="w-11 h-11 flex items-center justify-center rounded-full bg-gray-800/80 dark:bg-gray-200/80 text-white dark:text-gray-900 shadow-lg disabled:opacity-30 active:scale-95 transition-transform"
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-gray-800/80 dark:bg-gray-200/80 text-white dark:text-gray-900 shadow-lg disabled:opacity-30 active:scale-95 transition-transform backdrop-blur"
             aria-label="Previous article"
           >
             ↑
@@ -363,7 +366,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
           <button
             onClick={onNext}
             disabled={!onNext}
-            className="w-11 h-11 flex items-center justify-center rounded-full bg-gray-800/80 dark:bg-gray-200/80 text-white dark:text-gray-900 shadow-lg disabled:opacity-30 active:scale-95 transition-transform"
+            className="w-11 h-11 flex items-center justify-center rounded-full bg-gray-800/80 dark:bg-gray-200/80 text-white dark:text-gray-900 shadow-lg disabled:opacity-30 active:scale-95 transition-transform backdrop-blur"
             aria-label="Next article"
           >
             ↓
