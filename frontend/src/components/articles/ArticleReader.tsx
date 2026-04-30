@@ -60,28 +60,20 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
     containerRef.current?.scrollTo(0, 0);
   }, [articleId]);
 
-  // Swipe navigation (mobile) — runs once on mount; reads callbacks via stable refs
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onStart = (e: TouchEvent) => {
-      touchStartX.current = e.touches[0].clientX;
-      touchStartY.current = e.touches[0].clientY;
-    };
-    const onEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - touchStartX.current;
-      const dy = e.changedTouches[0].clientY - touchStartY.current;
-      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
-      if (dx < 0) onNextRef.current?.();
-      else onPrevRef.current?.();
-    };
-    el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchend', onEnd, { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchend', onEnd);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Swipe navigation (mobile) — declarative handlers so they attach once the
+  // container div actually renders (useEffect with [] never re-ran after the
+  // loading spinner was replaced by the real article DOM).
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
+    if (dx < 0) onNextRef.current?.();
+    else onPrevRef.current?.();
+  };
 
   // Auto-generate AI summary if not yet available
   useEffect(() => {
@@ -190,7 +182,12 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
   };
 
   return (
-    <div ref={containerRef} className="h-screen overflow-y-auto pt-12 md:pt-0">
+    <div
+      ref={containerRef}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      className="h-screen overflow-y-auto pt-12 md:pt-0"
+    >
       <article className="relative max-w-3xl mx-auto p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-2">
