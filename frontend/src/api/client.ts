@@ -47,6 +47,11 @@ export function getArticles(
     if (filters.order) params.set('order', filters.order);
     return fetchJSON(`${BASE}/articles/recommended?${params}`);
   }
+  if (filters.unrecommended) {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (filters.order) params.set('order', filters.order);
+    return fetchJSON(`${BASE}/articles/unrecommended?${params}`);
+  }
   const params = new URLSearchParams();
   if (filters.feed_id != null) params.set('feed_id', String(filters.feed_id));
   if (filters.is_read != null) params.set('is_read', String(filters.is_read));

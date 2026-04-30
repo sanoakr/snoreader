@@ -86,7 +86,7 @@ export function ArticleChatPanel({ articleId }: Props) {
   };
 
   return (
-    <div className="sticky bottom-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800">
+    <div className="sticky bottom-0 bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 overflow-hidden">
       <div className="max-w-3xl mx-auto">
         {(history.length > 0 || chat.isPending || error) && (
           <div ref={historyRef} className="max-h-[20vh] overflow-y-auto p-3 space-y-2 text-sm">
@@ -158,7 +158,7 @@ export function ArticleChatPanel({ articleId }: Props) {
           <button
             type="submit"
             disabled={chat.isPending || !input.trim()}
-            className="px-3 py-2 text-sm rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="shrink-0 px-3 py-2 text-sm rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Send
           </button>

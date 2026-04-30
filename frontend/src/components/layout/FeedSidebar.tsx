@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
-import { useRecommendedCount, useSavedCount, useAiStatus } from '../../hooks/useArticles';
+import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
@@ -36,6 +36,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
   const totalUnread = feeds?.reduce((s, f) => s + f.unread_count, 0) ?? 0;
   const { data: recommendedCount } = useRecommendedCount();
+  const { data: unrecommendedCount } = useUnrecommendedCount();
   const { data: savedCount } = useSavedCount();
   const { data: aiStatus } = useAiStatus();
 
@@ -83,6 +84,21 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
       </div>
 
       <nav className="flex-1 p-2 space-y-0.5">
+        {/* All articles */}
+        <button
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined, recommended: undefined, unrecommended: undefined })}
+          className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
+            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null && !filters.recommended && !filters.unrecommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+          }`}
+        >
+          <span>All</span>
+          {totalUnread > 0 && (
+            <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+              {totalUnread}
+            </span>
+          )}
+        </button>
+
         {/* Recommended */}
         <button
           onClick={() => onFilterChange({ recommended: true })}
@@ -98,24 +114,22 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           )}
         </button>
 
-        {/* All articles */}
+        {/* Unrecommended */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined, recommended: undefined })}
+          onClick={() => onFilterChange({ unrecommended: true })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
-            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null && !filters.recommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+            filters.unrecommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
-          <span>All</span>
-          {totalUnread > 0 && (
-            <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
-              {totalUnread}
-            </span>
+          <span>✧ Unrecommend</span>
+          {!!unrecommendedCount && (
+            <span className="text-xs text-gray-400 tabular-nums">{unrecommendedCount}</span>
           )}
         </button>
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, recommended: undefined })}
+          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, recommended: undefined, unrecommended: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.is_saved === true && filters.tag_id == null ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
@@ -231,6 +245,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                       is_saved: undefined,
                       tag_id: filters.tag_id === tag.id ? undefined : tag.id,
                       recommended: undefined,
+                      unrecommended: undefined,
                     })}
                     className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
                       filters.tag_id === tag.id
@@ -253,7 +268,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         {feeds?.map((feed) => (
           <div key={feed.id} className="group flex items-center">
             <button
-              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined, recommended: undefined })}
+              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined, recommended: undefined, unrecommended: undefined })}
               className={`flex-1 text-left px-3 py-1.5 rounded text-sm truncate flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-800 ${
                 filters.feed_id === feed.id ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
               }`}

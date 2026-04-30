@@ -75,12 +75,20 @@ async def rename_tag(tag_id: int, body: TagUpdate, session: AsyncSession = Depen
         en_name = input_name.lower()
         ja_name: str | None = None
     else:
-        from app.ai.tagger import translate_to_english
-        from app.ai.task_queue import PRIORITY_FOREGROUND
         ja_name = input_name
-        en_name = await translate_to_english(input_name, priority=PRIORITY_FOREGROUND)
-        if not en_name:
-            raise HTTPException(status_code=503, detail="LLM unavailable — cannot translate Japanese tag to English. Please enter an English tag name.")
+        existing_ja = (await session.execute(
+            select(Tag).where(Tag.name_ja == ja_name, Tag.id != tag_id)
+        )).scalar_one_or_none()
+        if existing_ja:
+            en_name = existing_ja.name
+        else:
+            from app.ai.tagger import translate_to_english
+            from app.ai.task_queue import PRIORITY_FOREGROUND
+            en_name = await translate_to_english(input_name, priority=PRIORITY_FOREGROUND)
+            if not en_name:
+                import re
+                slug = re.sub(r"[^\w]", "", input_name, flags=re.UNICODE).lower() or input_name
+                en_name = slug
 
     # 正規化後に同名なら何もしない
     if en_name == tag.name and (not ja_name or ja_name == tag.name_ja):
@@ -158,13 +166,22 @@ async def add_tag_to_article(
         en_name = input_name.lower()
         ja_name = body.name_ja
     else:
-        # Japanese input: generate English name via LLM and store as name
-        from app.ai.tagger import translate_to_english
-        from app.ai.task_queue import PRIORITY_FOREGROUND
         ja_name = input_name
-        en_name = await translate_to_english(input_name, priority=PRIORITY_FOREGROUND)
-        if not en_name:
-            raise HTTPException(status_code=503, detail="LLM unavailable — cannot translate Japanese tag to English. Please enter an English tag name.")
+        # First check if a tag with this name_ja already exists — no LLM needed
+        existing_ja = (await session.execute(
+            select(Tag).where(Tag.name_ja == ja_name)
+        )).scalar_one_or_none()
+        if existing_ja:
+            en_name = existing_ja.name
+        else:
+            from app.ai.tagger import translate_to_english
+            from app.ai.task_queue import PRIORITY_FOREGROUND
+            en_name = await translate_to_english(input_name, priority=PRIORITY_FOREGROUND)
+            if not en_name:
+                # LLM unavailable: store Japanese as-is using a slugified key
+                import re
+                slug = re.sub(r"[^\w]", "", input_name, flags=re.UNICODE).lower() or input_name
+                en_name = slug
 
     result = await session.execute(select(Tag).where(Tag.name == en_name))
     tag = result.scalar_one_or_none()
