@@ -16,6 +16,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - AI tag suggestions (generated from AI summary)
 - Article-scoped LLM chat panel with optional DuckDuckGo web search (triggered by keywords like "検索", "最新", "調べて")
 - IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags
+- "Unrecommend" view — unread articles with zero saved-tag overlap (sidebar order: All / Recommend / Unrecommend / Saved)
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)

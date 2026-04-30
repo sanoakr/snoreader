@@ -14,6 +14,7 @@
 - AI タグ提案（AI 要約から生成）
 - 記事単位の LLM チャットパネル（必要に応じて DuckDuckGo Web 検索を併用、トリガー: 「検索」「最新」「調べて」など）
 - IDF 重み付き「Recommend」ビュー（高カバー率タグを自動除外）
+- 「Unrecommend」ビュー——保存済みタグとの重複がゼロの未読記事（サイドバー順: All / Recommend / Unrecommend / Saved）
 - OPML インポート / エクスポート
 - Saved 記事インポート（Inoreader / Google Reader JSON 形式）
 - キーボードショートカット（`j`/`k` ナビ、`s` 保管、`/` 検索）
