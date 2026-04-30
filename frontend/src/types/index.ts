@@ -63,6 +63,7 @@ export interface ArticleFilters {
   sort?: string;
   order?: string;
   recommended?: boolean;
+  unrecommended?: boolean;
 }
 
 export interface ChatMessage {

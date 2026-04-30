@@ -107,6 +107,14 @@ export function useRecommendedCount() {
   });
 }
 
+export function useUnrecommendedCount() {
+  return useQuery({
+    queryKey: ['unrecommended-count'],
+    queryFn: () => api.getArticles({ unrecommended: true }, 0, 1).then(r => r.total),
+    staleTime: 60_000,
+  });
+}
+
 export function useSavedCount() {
   return useQuery({
     queryKey: ['saved-count'],

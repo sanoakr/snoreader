@@ -12,6 +12,9 @@
 - 日英バイリンガルタグ——日英表示切り替え・手動入力時の自動翻訳
 - AI 要約自動生成（バックグラウンドジョブ、日本語箇条書き）
 - AI タグ提案（AI 要約から生成）
+- 記事単位の LLM チャットパネル（必要に応じて DuckDuckGo Web 検索を併用、トリガー: 「検索」「最新」「調べて」など）
+- IDF 重み付き「Recommend」ビュー（高カバー率タグを自動除外）
+- 「Unrecommend」ビュー——保存済みタグとの重複がゼロの未読記事（サイドバー順: All / Recommend / Unrecommend / Saved）
 - OPML インポート / エクスポート
 - Saved 記事インポート（Inoreader / Google Reader JSON 形式）
 - キーボードショートカット（`j`/`k` ナビ、`s` 保管、`/` 検索）
@@ -27,6 +30,7 @@
 | フィード解析 | feedparser, trafilatura |
 | スケジューラ | APScheduler 3.x |
 | AI（オプション） | mlx-lm.server（ローカル LLM、OpenAI 互換） |
+| Web 検索（オプション） | DuckDuckGo（`ddgs`） |
 
 ## 前提条件
 
@@ -74,6 +78,11 @@ LLM サーバーが利用可能な場合、SnoReader は以下を自動実行す
 - 記事の日本語箇条書き要約をバックグラウンドで生成（優先順：Saved > 未読 > 既読）
 - AI 要約をもとにタグを提案
 - 手動入力された日本語タグを英語に自動翻訳
+- リーダーペイン下部のチャットパネルで記事に関する自由質問を受け付け（セッション内履歴のみ、記事切替でクリア）
+
+### チャット Web 検索
+
+チャット入力にトリガーワード（`検索`、`調べて`、`search`、`最新`、`latest`、または「今…？」疑問文）が含まれる場合、バックエンドが `ddgs` 経由で DuckDuckGo 検索を実行し、上位 3 件を LLM コンテキストに注入、回答と合わせてソースリンクを返す。検索失敗・タイムアウト時は記事のみをコンテキストにフォールバックする。
 
 ## 本番デプロイ
 
@@ -123,7 +132,8 @@ snoreader/
 │       ├── services/
 │       │   ├── feed_fetcher.py   #   RSS 取得・パース
 │       │   ├── content_extractor.py # trafilatura 本文抽出
-│       │   └── scheduler.py      #   APScheduler: フィード更新 + AI 要約
+│       │   ├── scheduler.py      #   APScheduler: フィード更新 + AI 要約
+│       │   └── web_search.py     #   チャット用 DuckDuckGo 検索ヘルパー
 │       └── ai/
 │           ├── llm_client.py     #   OpenAI 互換 LLM クライアント
 │           ├── summarizer.py     #   記事要約
@@ -136,7 +146,7 @@ snoreader/
 │       ├── hooks/                # TanStack Query フック
 │       └── components/
 │           ├── layout/FeedSidebar.tsx
-│           └── articles/{ArticleList,ArticleCard,ArticleReader}.tsx
+│           └── articles/{ArticleList,ArticleCard,ArticleReader,ArticleChatPanel}.tsx
 ├── data/                         # SQLite DB（git 管理外）
 ├── certs/                        # TLS 証明書（git 管理外）
 └── Makefile

@@ -1,5 +1,7 @@
 # SnoReader
 
+[日本語版 README](README.ja.md)
+
 A self-hosted RSS reader — access from multiple devices on your LAN via browser.
 
 ## Features
@@ -12,6 +14,9 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - Bilingual tagging — English/Japanese display toggle, manual input with auto-translation
 - AI summary auto-generation (background job, Japanese bullet points)
 - AI tag suggestions (generated from AI summary)
+- Article-scoped LLM chat panel with optional DuckDuckGo web search (triggered by keywords like "検索", "最新", "調べて")
+- IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags
+- "Unrecommend" view — unread articles with zero saved-tag overlap (sidebar order: All / Recommend / Unrecommend / Saved)
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)
@@ -27,6 +32,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 | Feed parsing | feedparser, trafilatura |
 | Scheduler | APScheduler 3.x |
 | AI (optional) | mlx-lm.server (local LLM, OpenAI-compatible) |
+| Web search (optional) | DuckDuckGo via `ddgs` |
 
 ## Prerequisites
 
@@ -74,6 +80,11 @@ When the LLM server is available, SnoReader:
 - Auto-generates Japanese bullet-point summaries for articles (background job, priority: Saved > Unread > Read)
 - Suggests tags based on the AI summary
 - Auto-translates manually entered Japanese tags into English
+- Enables a chat panel at the bottom of the reader pane for free-form questions about the current article (session-only history, cleared on article switch)
+
+### Chat web search
+
+When a chat message contains a trigger word (`検索`, `調べて`, `search`, `最新`, `latest`, or a "今…？" question), the backend runs a DuckDuckGo search via `ddgs`, injects the top 3 results into the LLM context, and returns source links alongside the reply. Search failures or timeouts fall back silently to article-only answers.
 
 ## Production
 
@@ -123,7 +134,8 @@ snoreader/
 │       ├── services/
 │       │   ├── feed_fetcher.py   #   RSS fetch + parse
 │       │   ├── content_extractor.py # trafilatura article extraction
-│       │   └── scheduler.py      #   APScheduler: feed refresh + AI summarization
+│       │   ├── scheduler.py      #   APScheduler: feed refresh + AI summarization
+│       │   └── web_search.py     #   DuckDuckGo search helper for chat
 │       └── ai/
 │           ├── llm_client.py     #   OpenAI-compatible LLM client
 │           ├── summarizer.py     #   article summarization
@@ -136,7 +148,7 @@ snoreader/
 │       ├── hooks/                # TanStack Query hooks
 │       └── components/
 │           ├── layout/FeedSidebar.tsx
-│           └── articles/{ArticleList,ArticleCard,ArticleReader}.tsx
+│           └── articles/{ArticleList,ArticleCard,ArticleReader,ArticleChatPanel}.tsx
 ├── data/                         # SQLite DB (gitignored)
 ├── certs/                        # TLS certificates (gitignored)
 └── Makefile

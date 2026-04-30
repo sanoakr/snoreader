@@ -191,7 +191,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
 
   return (
     <div ref={containerRef} className="h-screen overflow-y-auto pt-12 md:pt-0">
-      <article className="max-w-3xl mx-auto p-6">
+      <article className="relative max-w-3xl mx-auto p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-2">
             <a
@@ -349,11 +349,9 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
         )}
       </article>
 
-      {aiAvailable && <ArticleChatPanel articleId={article.id} />}
-
-      {/* Floating prev/next buttons (mobile only) */}
+      {/* Prev/next buttons — bottom-right of article body (mobile only, above chat panel) */}
       {(onPrev || onNext) && (
-        <div className="md:hidden fixed bottom-6 right-4 flex flex-col gap-2 z-30">
+        <div className="md:hidden flex justify-end gap-2 mt-6 pb-2">
           <button
             onClick={onPrev}
             disabled={!onPrev}
@@ -372,6 +370,8 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
           </button>
         </div>
       )}
+
+      {aiAvailable && <ArticleChatPanel articleId={article.id} />}
     </div>
   );
 }

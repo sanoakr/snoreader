@@ -162,6 +162,63 @@ async def get_recommended_articles(
     return PaginatedArticles(items=items, total=total, offset=offset, limit=limit)
 
 
+@router.get("/articles/unrecommended", response_model=PaginatedArticles)
+async def get_unrecommended_articles(
+    sort: str = Query("date", pattern="^(date)$"),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return unread articles with zero overlap with saved article tags."""
+    import json as _json
+
+    freq_stmt = (
+        select(Tag.name)
+        .join(ArticleTag, Tag.id == ArticleTag.tag_id)
+        .join(Article, ArticleTag.article_id == Article.id)
+        .where(Article.is_saved == True)  # noqa: E712
+        .distinct()
+    )
+    saved_tag_names: set[str] = set((await session.execute(freq_stmt)).scalars())
+
+    stmt = (
+        select(Article, Feed.title.label("feed_title"))
+        .join(Feed)
+        .where(
+            Article.is_read == False,  # noqa: E712
+            Article.is_saved == False,  # noqa: E712
+            Article.tag_suggestions.isnot(None),
+        )
+    )
+    rows = (await session.execute(stmt)).all()
+
+    def _pub_ts(a: Article) -> float:
+        try:
+            return datetime.fromisoformat(a.published_at).timestamp() if a.published_at else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    unmatched: list[tuple[Article, str]] = []
+    for row in rows:
+        article, feed_title = row[0], row[1]
+        suggestions = set(_json.loads(article.tag_suggestions))
+        if not suggestions & saved_tag_names:
+            unmatched.append((article, feed_title))
+
+    unmatched.sort(key=lambda x: -_pub_ts(x[0]) if order == "desc" else _pub_ts(x[0]))
+
+    total = len(unmatched)
+    page = unmatched[offset: offset + limit]
+
+    items = []
+    for article, feed_title in page:
+        out = ArticleOut.model_validate(article)
+        out.feed_title = feed_title
+        items.append(out)
+    return PaginatedArticles(items=items, total=total, offset=offset, limit=limit)
+
+
 @router.get("/articles/{article_id}", response_model=ArticleDetail)
 async def get_article(article_id: int, session: AsyncSession = Depends(get_session)):
     article = await session.get(Article, article_id)

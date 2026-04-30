@@ -66,11 +66,21 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
     return [pinned, ...articles];
   }, [articles, selectedId]);
 
-  // Reset scroll on filter/search change and clear pinned article
+  // Reset scroll on filter/search change, clear pinned article, and auto-select first article
   useEffect(() => {
     listRef.current?.scrollTo(0, 0);
     pinnedArticleRef.current = null;
+    setSelectedId(null);
   }, [filters, searchQuery]);
+
+  // Auto-select the first article when the article list loads after a filter change
+  useEffect(() => {
+    if (selectedId != null) return;
+    if (isLoading) return;
+    if (displayArticles.length > 0) {
+      setSelectedId(displayArticles[0].id);
+    }
+  }, [displayArticles, isLoading, selectedId]);
 
   // Infinite scroll via IntersectionObserver
   useEffect(() => {
@@ -182,7 +192,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
             className="w-full px-2 py-1.5 text-sm border rounded dark:bg-gray-800 dark:border-gray-600"
           />
           <div className="flex items-center gap-1.5 flex-wrap">
-            {!filters.recommended && !filters.is_saved && (
+            {!filters.recommended && !filters.unrecommended && !filters.is_saved && (
               <>
                 <button onClick={() => onFilterChange({ ...filters, is_read: false })} className={filterBtnClass(filters.is_read === false)}>Unread</button>
                 <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
@@ -255,6 +265,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               ← Back
             </button>
             <ArticleReader
+              key={selectedId}
               articleId={selectedId}
               tagLang={tagLang}
               aiAvailable={aiAvailable}
