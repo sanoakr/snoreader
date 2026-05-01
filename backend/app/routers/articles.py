@@ -8,8 +8,11 @@ from sqlalchemy import Integer, case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-# 保存記事の 50% 以上に付与されたタグは過剰カバレッジとみなし、Recommend スコアから除外する
-_HIGH_COVERAGE_THRESHOLD = 0.5
+# 保存記事の 30% 以上に付与されたタグは過剰カバレッジとみなし、Recommend スコアから除外する
+_HIGH_COVERAGE_THRESHOLD = 0.3
+
+# Recommend に含めるスコア下限（弱い 1 タグ一致を排除）
+_RECOMMEND_SCORE_MIN = 1.0
 
 from app.config import settings
 from app.database import get_session
@@ -140,7 +143,7 @@ async def get_recommended_articles(
             for t in suggestions
             if t in scoreable_freq
         )
-        if score > 0:
+        if score > _RECOMMEND_SCORE_MIN:
             scored.append((score, article, feed_title))
 
     def _pub_ts(a: Article) -> float:
@@ -379,30 +382,65 @@ async def suggest_article_tags(
     article_id: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Return pre-computed tag suggestions, or generate via AI if not yet available."""
+    """Return tag suggestions merged from existing-tag keyword match + LLM candidates."""
     import json as _json
+    from app.ai.tag_matcher import match_existing_tags
 
-    article = await session.get(Article, article_id)
+    stmt = (
+        select(Article)
+        .options(selectinload(Article.tags))
+        .where(Article.id == article_id)
+    )
+    article = (await session.execute(stmt)).scalar_one_or_none()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    # Use pre-computed suggestions from summarize_and_tag when available
-    if article.tag_suggestions:
-        en_names = _json.loads(article.tag_suggestions)
-        if en_names:
-            tag_result = await session.execute(select(Tag).where(Tag.name.in_(en_names)))
-            tag_map = {t.name: t.name_ja for t in tag_result.scalars()}
-            return [TagSuggestion(name=en, name_ja=tag_map.get(en)) for en in en_names]
+    body_text = article.content or article.ai_summary or article.summary or ""
 
-    # Fallback: generate via combined LLM call
+    all_tags: list[Tag] = list((await session.execute(select(Tag))).scalars())
+    tag_by_name: dict[str, Tag] = {t.name: t for t in all_tags}
+
+    matched = match_existing_tags(all_tags, article.title, body_text)
+
+    llm_names: list[str] = []
+    if article.tag_suggestions:
+        try:
+            llm_names = _json.loads(article.tag_suggestions)
+        except (ValueError, TypeError):
+            llm_names = []
+
+    attached_ids = {t.id for t in (article.tags or [])}
+    seen: set[str] = set()
+    out: list[TagSuggestion] = []
+
+    for t in matched:
+        if t.id in attached_ids or t.name in seen:
+            continue
+        seen.add(t.name)
+        out.append(TagSuggestion(name=t.name, name_ja=t.name_ja))
+
+    for en in llm_names:
+        if en in seen:
+            continue
+        seen.add(en)
+        existing = tag_by_name.get(en)
+        if existing and existing.id in attached_ids:
+            continue
+        out.append(TagSuggestion(
+            name=en,
+            name_ja=existing.name_ja if existing else None,
+        ))
+
+    if out:
+        return out
+
+    # Fallback: LLM で新規生成
     from app.ai.processor import summarize_and_tag
     from app.ai.task_queue import PRIORITY_FOREGROUND
 
-    existing = await session.execute(select(Tag.name))
-    existing_names = list(existing.scalars())
-    text = article.ai_summary or article.content or article.summary or ""
+    existing_names = [t.name for t in all_tags]
     _, pairs = await summarize_and_tag(
-        article.title, text, existing_tags=existing_names, priority=PRIORITY_FOREGROUND
+        article.title, body_text, existing_tags=existing_names, priority=PRIORITY_FOREGROUND
     )
     if not pairs:
         raise HTTPException(status_code=503, detail="LLM server unavailable or no tags generated")
@@ -515,7 +553,7 @@ async def _bulk_tag_job(article_ids: list[int]) -> None:
             article = await session.get(Article, article_id)
             if not article:
                 continue
-            text = article.ai_summary or article.content or article.summary or ""
+            text = article.content or article.summary or ""
             pairs = await suggest_tags(article.title, text, existing_tags=existing_names)
             for tag_name, tag_name_ja in pairs:
                 result = await session.execute(select(Tag).where(Tag.name == tag_name))
