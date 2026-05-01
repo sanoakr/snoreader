@@ -83,10 +83,13 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     onTotalChange?.(total);
   }, [total, onTotalChange]);
 
-  // Auto-select the first article when the article list loads after a filter change
+  // Auto-select the first article when the article list loads after a filter change.
+  // モバイルでは Reader が画面を覆ってしまうため、ユーザーの明示的なタップまで
+  // 自動選択はしない。デスクトップは並列表示なので従来通り先頭を開いて OK。
   useEffect(() => {
     if (selectedId != null) return;
     if (isLoading) return;
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return;
     if (displayArticles.length > 0) {
       setSelectedId(displayArticles[0].id);
     }

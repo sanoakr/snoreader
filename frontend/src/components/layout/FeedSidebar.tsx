@@ -225,14 +225,14 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                       </span>
                         <button
                           onClick={() => { setEditingTagId(tag.id); setEditingTagName(tag.name); }}
-                          className="text-gray-300 hover:text-blue-500 text-xs opacity-0 group-hover:opacity-100"
+                          className="text-gray-400 hover:text-blue-500 text-sm px-1 leading-none"
                           title="Rename"
                         >
                           ✏
                         </button>
                         <button
                           onClick={() => { if (confirm(`Delete tag "${tag.name}"?`)) bulkDeleteTags.mutate([tag.id]); }}
-                          className="text-gray-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100"
+                          className="text-gray-400 hover:text-red-500 text-sm px-1 leading-none"
                           title="Delete"
                         >
                           ×
