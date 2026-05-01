@@ -254,6 +254,32 @@ async def get_article(article_id: int, session: AsyncSession = Depends(get_sessi
     return detail
 
 
+async def _auto_attach_matching_tags(session: AsyncSession, article: Article) -> int:
+    """Scan existing tags against title/body and attach any matches that aren't
+    already on the article. Returns the number of tags attached."""
+    from app.ai.tag_matcher import match_existing_tags
+
+    attached_result = await session.execute(
+        select(ArticleTag.tag_id).where(ArticleTag.article_id == article.id)
+    )
+    attached_ids = set(attached_result.scalars().all())
+
+    all_tags: list[Tag] = list((await session.execute(select(Tag))).scalars())
+    if not all_tags:
+        return 0
+
+    body_text = article.content or article.ai_summary or article.summary or ""
+    matched = match_existing_tags(all_tags, article.title, body_text)
+
+    added = 0
+    for tag in matched:
+        if tag.id in attached_ids:
+            continue
+        session.add(ArticleTag(article_id=article.id, tag_id=tag.id))
+        added += 1
+    return added
+
+
 @router.patch("/articles/{article_id}", response_model=ArticleOut)
 async def update_article(
     article_id: int,
@@ -269,13 +295,47 @@ async def update_article(
     if body.is_read is not None:
         article.is_read = body.is_read
         article.read_at = now if body.is_read else None
+
+    newly_saved = False
     if body.is_saved is not None:
+        newly_saved = body.is_saved and not article.is_saved
         article.is_saved = body.is_saved
         article.saved_at = now if body.is_saved else None
+
+    # 新規 Saved 化 + 未タグ付けなら既存タグで自動マッチ
+    if newly_saved:
+        existing_tag_ids = (await session.execute(
+            select(ArticleTag.tag_id).where(ArticleTag.article_id == article.id)
+        )).scalars().all()
+        if not existing_tag_ids:
+            await _auto_attach_matching_tags(session, article)
 
     await session.commit()
     await session.refresh(article)
     return ArticleOut.model_validate(article)
+
+
+@router.post("/articles/auto-tag-saved", response_model=dict)
+async def auto_tag_saved_articles(session: AsyncSession = Depends(get_session)):
+    """既存の Saved 記事でタグ未付与のものに、既存タグのキーワードマッチで一括タグ付け。"""
+    stmt = (
+        select(Article)
+        .options(selectinload(Article.tags))
+        .where(Article.is_saved == True)  # noqa: E712
+    )
+    saved_articles = (await session.execute(stmt)).scalars().all()
+
+    processed = 0
+    attached_total = 0
+    for article in saved_articles:
+        if article.tags:
+            continue
+        added = await _auto_attach_matching_tags(session, article)
+        if added:
+            attached_total += added
+            processed += 1
+    await session.commit()
+    return {"processed": processed, "attached": attached_total}
 
 
 @router.post("/articles/mark-all-read", response_model=dict)
