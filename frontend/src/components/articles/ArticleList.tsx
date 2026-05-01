@@ -232,6 +232,27 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               </button>
             )}
           </div>
+          {/* Tag filter chips — only in Saved view. Toggles tag_id while preserving is_saved. */}
+          {filters.is_saved && tags && tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => onFilterChange({
+                    ...filters,
+                    tag_id: filters.tag_id === tag.id ? undefined : tag.id,
+                  })}
+                  className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
+                    filters.tag_id === tag.id
+                      ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  #{tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Article list */}
