@@ -10,13 +10,18 @@ from app.models import Tag
 def _match(keyword: str, haystack: str) -> bool:
     """Case-insensitive match.
 
-    短い ASCII キーワード (<=4 chars) は word boundary を要求して誤爆を防ぐ
-    (e.g. 'ai' が 'said' にマッチするのを回避)。それ以外はシンプルな部分一致。
+    短い ASCII キーワード (<=4 chars) は ASCII 英数字の両端が「英数字でない」
+    ことを要求して誤爆を防ぐ (e.g. 'ai' が 'said' にマッチするのを回避)。
+    Python の \\b は日本語文字も \\w とみなすため 'AIの女の子' のように日本語と
+    隣接したケースを取りこぼす。明示的な negative lookaround で ASCII のみ境界
+    を判定する。
+    それ以外（長い英語 / Unicode タグ）はシンプルな部分一致。
     """
     kw = keyword.lower()
     hay = haystack.lower()
     if kw.isascii() and len(kw) <= 4:
-        return re.search(rf"\b{re.escape(kw)}\b", hay) is not None
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(kw)}(?![A-Za-z0-9])"
+        return re.search(pattern, hay) is not None
     return kw in hay
 
 

@@ -37,3 +37,18 @@ def test_title_priority_over_body():
     tags = [_tag("body-only", None, 1), _tag("title-match", None, 2)]
     result = match_existing_tags(tags, "title-match release", "body-only content here")
     assert [t.name for t in result] == ["title-match", "body-only"]
+
+
+def test_short_ascii_matches_adjacent_to_japanese():
+    # Python の \b は日本語文字も \w とみなすため、'AIの' のように日本語と
+    # 隣接していても ASCII 単語としてはマッチすべき。
+    tags = [_tag("ai", "AI", 1), _tag("llm", "LLM", 2), _tag("ocr", "OCR", 3)]
+    result = match_existing_tags(tags, "生成AIを取り入れたLLMとOCR活用", "")
+    assert {t.name for t in result} == {"ai", "llm", "ocr"}
+
+
+def test_short_ascii_does_not_match_substring_of_longer_word():
+    # 'code' は 'CodeX' の一部として出てきてもマッチしてはいけない。
+    tags = [_tag("code", None, 1)]
+    result = match_existing_tags(tags, "CodeX のデスクトップアプリを触ってみた", "")
+    assert result == []
