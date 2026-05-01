@@ -21,6 +21,7 @@ export interface Tag {
 export interface TagSuggestion {
   name: string;
   name_ja: string | null;
+  existing?: boolean;
 }
 
 export interface Article {
