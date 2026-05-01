@@ -67,7 +67,7 @@ export function ArticleCard({ article, isSelected, onClick, dimRead = true }: Pr
           <span className="truncate">{article.feed_title}</span>
           <span>{timeAgo(article.published_at)}</span>
           {article.rec_score != null && (
-            <span className="text-amber-500 font-medium">★{article.rec_score}</span>
+            <span className="text-amber-500 font-medium">★{article.rec_score.toFixed(1)}</span>
           )}
         </div>
       </div>
