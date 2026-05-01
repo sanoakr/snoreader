@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FeedSidebar } from './components/layout/FeedSidebar';
 import { ArticleList } from './components/articles/ArticleList';
+import { useFeeds } from './hooks/useFeeds';
+import { useTags } from './hooks/useTags';
 import type { ArticleFilters } from './types';
 
 const queryClient = new QueryClient({
@@ -48,6 +50,32 @@ function AppInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, toggleDark] = useDarkMode();
   const [tagLang, toggleTagLang] = useTagLang();
+  const [viewTotal, setViewTotal] = useState(0);
+  const { data: feeds } = useFeeds();
+  const { data: tags } = useTags();
+
+  const totalUnread = (feeds ?? []).reduce((s, f) => s + f.unread_count, 0);
+
+  const viewLabel = useMemo(() => {
+    if (filters.recommended) return 'Recommend';
+    if (filters.unrecommended) return 'Unrecommend';
+    if (filters.is_saved) {
+      if (filters.untagged) return tagLang === 'ja' ? 'Saved / タグなし' : 'Saved / Untagged';
+      if (filters.tag_id != null) {
+        const t = tags?.find(x => x.id === filters.tag_id);
+        const name = t ? (tagLang === 'ja' && t.name_ja ? t.name_ja : t.name) : '';
+        return `Saved / #${name}`;
+      }
+      return 'Saved';
+    }
+    if (filters.feed_id != null) {
+      const f = feeds?.find(x => x.id === filters.feed_id);
+      return f?.title || f?.url || 'Feed';
+    }
+    if (filters.is_read === false) return 'Unread';
+    if (filters.is_read === true) return 'Read';
+    return 'All';
+  }, [filters, feeds, tags, tagLang]);
 
   const handleFilterChange = (f: ArticleFilters) => {
     setFilters(f);
@@ -66,7 +94,12 @@ function AppInner() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <span className="text-sm font-bold flex-1">SnoReader</span>
+        <div className="flex-1 min-w-0 flex items-baseline gap-2">
+          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{viewLabel}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 tabular-nums">
+            {viewTotal}件 / 未読 {totalUnread}
+          </span>
+        </div>
         <button onClick={toggleDark} className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-sm">
           {dark ? '☀' : '☾'}
         </button>
@@ -96,7 +129,7 @@ function AppInner() {
 
       {/* Main content */}
       <div className="flex-1 min-w-0 pt-12 md:pt-0">
-        <ArticleList filters={filters} onFilterChange={setFilters} tagLang={tagLang} />
+        <ArticleList filters={filters} onFilterChange={setFilters} tagLang={tagLang} onTotalChange={setViewTotal} />
       </div>
     </div>
   );

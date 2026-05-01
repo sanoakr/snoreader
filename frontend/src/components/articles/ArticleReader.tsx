@@ -390,12 +390,13 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
         )}
       </article>
 
-      {/* Floating prev/next buttons — mobile only, pinned above the chat panel */}
-      {(onPrev || onNext) && (
-        <div
-          className="md:hidden fixed right-3 flex flex-col gap-2 z-20"
-          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 4rem)' }}
-        >
+      {/* Floating prev/next buttons — mobile only, pinned above the chat panel.
+          Keep the frame visible even when one direction is disabled so the
+          user always has an affordance to navigate. */}
+      <div
+        className="md:hidden fixed right-3 flex flex-col gap-2 z-20"
+        style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 4rem)' }}
+      >
           <button
             onClick={onPrev}
             disabled={!onPrev}
@@ -412,8 +413,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
           >
             ↓
           </button>
-        </div>
-      )}
+      </div>
 
       {aiAvailable && <ArticleChatPanel articleId={article.id} />}
     </div>
