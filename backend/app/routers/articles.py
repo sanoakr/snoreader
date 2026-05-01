@@ -35,6 +35,7 @@ async def list_articles(
     is_read: bool | None = None,
     is_saved: bool | None = None,
     tag_id: int | None = None,
+    untagged: bool = False,
     sort: str = "published_at",
     order: str = "desc",
     offset: int = Query(0, ge=0),
@@ -56,6 +57,9 @@ async def list_articles(
     if tag_id is not None:
         stmt = stmt.where(Article.id.in_(select(ArticleTag.article_id).where(ArticleTag.tag_id == tag_id)))
         count_stmt = count_stmt.where(Article.id.in_(select(ArticleTag.article_id).where(ArticleTag.tag_id == tag_id)))
+    if untagged:
+        stmt = stmt.where(~Article.id.in_(select(ArticleTag.article_id)))
+        count_stmt = count_stmt.where(~Article.id.in_(select(ArticleTag.article_id)))
 
     # Sort
     allowed_sorts = {"published_at", "fetched_at", "title"}
