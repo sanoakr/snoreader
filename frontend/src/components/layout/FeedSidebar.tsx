@@ -147,6 +147,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             Keep rename/delete and batch ops (JA補完 / AI tag) accessible here via ⚙. */}
         {tags && tags.length > 0 && (
           <>
+            <hr className="my-2 border-gray-200 dark:border-gray-700" />
             <div className="flex items-center justify-between px-3 pt-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-500 dark:text-gray-400">Tags</span>
