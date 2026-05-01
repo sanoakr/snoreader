@@ -83,25 +83,20 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
     }
   }, [article?.id, aiAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-suggest tags once AI summary is available (saved or not)
+  // Auto-suggest tags once AI summary is available (saved or not).
+  // Existing tags come first and are flagged so the UI can color-code them.
   useEffect(() => {
     if (article && article.ai_summary && aiAvailable && !suggestTried.current) {
       suggestTried.current = true;
       suggestTags.mutate(article.id, {
         onSuccess: (suggestions) => {
           const existing = existingTags ?? [];
-          const autoAdd = suggestions.filter(s =>
-            existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
-          );
-          const manual = suggestions.filter(s =>
-            !existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
-          );
-          if (article.is_saved) {
-            autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
-            setSuggestedTags(manual);
-          } else {
-            setSuggestedTags([...autoAdd, ...manual]);
-          }
+          const merged = suggestions.map(s => ({
+            ...s,
+            existing: existing.some(e => e.name.toLowerCase() === s.name.toLowerCase()),
+          }));
+          merged.sort((a, b) => Number(!!b.existing) - Number(!!a.existing));
+          setSuggestedTags(merged);
         },
       });
     }
@@ -137,14 +132,12 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
     suggestTags.mutate(article.id, {
       onSuccess: (suggestions) => {
         const existing = existingTags ?? [];
-        const autoAdd = suggestions.filter(s =>
-          existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
-        );
-        const manual = suggestions.filter(s =>
-          !existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
-        );
-        autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
-        setSuggestedTags(manual);
+        const merged = suggestions.map(s => ({
+          ...s,
+          existing: existing.some(e => e.name.toLowerCase() === s.name.toLowerCase()),
+        }));
+        merged.sort((a, b) => Number(!!b.existing) - Number(!!a.existing));
+        setSuggestedTags(merged);
       },
     });
   };
@@ -152,6 +145,28 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
   const handleAcceptTag = (suggestion: TagSuggestion) => {
     addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
     setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
+  };
+
+  // Existing-tag autocomplete for the manual input field.
+  const attachedTagIds = new Set(article.tags?.map(t => t.id) ?? []);
+  const _q = tagInput.trim().toLowerCase();
+  const tagCandidates = _q
+    ? (existingTags ?? [])
+        .filter(t =>
+          !attachedTagIds.has(t.id) &&
+          (t.name.toLowerCase().includes(_q) || (t.name_ja ?? '').toLowerCase().includes(_q))
+        )
+        .slice(0, 8)
+    : [];
+
+  const handlePickExistingTag = (t: { name: string; name_ja: string | null }) => {
+    addTag.mutate(
+      { articleId: article.id, name: t.name, name_ja: t.name_ja },
+      {
+        onSuccess: () => { setTagInput(''); setShowTagInput(false); },
+        onError: (err) => { alert((err as Error).message); },
+      }
+    );
   };
 
   const handleSaveToggle = () => {
@@ -165,14 +180,12 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
             suggestTags.mutate(article.id, {
               onSuccess: (suggestions) => {
                 const existing = existingTags ?? [];
-                const autoAdd = suggestions.filter(s =>
-                  existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
-                );
-                const manual = suggestions.filter(s =>
-                  !existing.some(e => e.name.toLowerCase() === s.name.toLowerCase())
-                );
-                autoAdd.forEach(s => addTag.mutate({ articleId: article.id, name: s.name, name_ja: s.name_ja }));
-                setSuggestedTags(manual);
+                const merged = suggestions.map(s => ({
+                  ...s,
+                  existing: existing.some(e => e.name.toLowerCase() === s.name.toLowerCase()),
+                }));
+                merged.sort((a, b) => Number(!!b.existing) - Number(!!a.existing));
+                setSuggestedTags(merged);
               },
             });
           }
@@ -233,18 +246,35 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
                 </span>
               ))}
               {showTagInput ? (
-                <form onSubmit={handleAddTag} className="inline-flex">
-                  <input
-                    type="text"
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
-                    placeholder="英語 or 日本語"
-                    className="w-24 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
-                    autoFocus
-                    onBlur={() => { if (!tagInput) setShowTagInput(false); }}
-                    onKeyDown={(e) => { if (e.key === 'Escape') setShowTagInput(false); }}
-                  />
-                </form>
+                <div className="inline-flex flex-col gap-1">
+                  <form onSubmit={handleAddTag}>
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      placeholder="英語 or 日本語"
+                      className="w-32 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+                      autoFocus
+                      onBlur={() => { setTimeout(() => { if (!tagInput) setShowTagInput(false); }, 150); }}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setShowTagInput(false); }}
+                    />
+                  </form>
+                  {tagInput.trim() && tagCandidates.length > 0 && (
+                    <div className="flex flex-wrap gap-1 max-w-xs">
+                      {tagCandidates.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handlePickExistingTag(t)}
+                          className="px-1.5 py-0.5 text-xs border border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                        >
+                          {tagLang === 'ja' && t.name_ja ? t.name_ja : t.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button
                   onClick={() => setShowTagInput(true)}
@@ -264,15 +294,21 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
             </div>
           )}
 
-          {/* AI suggested tags — shown for any article once available */}
+          {/* AI suggested tags — shown for any article once available.
+              Existing tags (blue) are listed before newly generated ones (purple). */}
           {suggestedTags.length > 0 && (
             <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-purple-500">Suggested:</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Suggested:</span>
               {suggestedTags.map((s) => (
                 <button
                   key={s.name}
                   onClick={() => handleAcceptTag(s)}
-                  className="px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                  title={s.existing ? 'Existing tag' : 'New tag (AI generated)'}
+                  className={
+                    s.existing
+                      ? 'px-2 py-0.5 text-xs border border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                      : 'px-2 py-0.5 text-xs border border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 rounded hover:bg-purple-50 dark:hover:bg-purple-900/30'
+                  }
                 >
                   + {tagLang === 'ja' && s.name_ja ? s.name_ja : s.name}
                 </button>
