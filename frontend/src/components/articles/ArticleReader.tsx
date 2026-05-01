@@ -218,13 +218,21 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
             {article.author && <span>by {article.author}</span>}
             {publishedDate && <span>{publishedDate}</span>}
           </div>
-          <div className="mt-3">
+          <div className="mt-3 flex items-center gap-4">
             <button
               onClick={handleSaveToggle}
               disabled={updateArticle.isPending}
               className={`text-sm disabled:opacity-50 ${article.is_saved ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
             >
               {article.is_saved ? '★ Saved' : '☆ Save'}
+            </button>
+            <button
+              onClick={() => updateArticle.mutate({ id: article.id, data: { is_read: !article.is_read } })}
+              disabled={updateArticle.isPending}
+              title={article.is_read ? 'Mark as unread' : 'Mark as read'}
+              className={`text-sm disabled:opacity-50 ${article.is_read ? 'text-gray-400 hover:text-blue-500' : 'text-blue-500 hover:text-gray-400'}`}
+            >
+              {article.is_read ? '○ Unread' : '● Read'}
             </button>
           </div>
 
