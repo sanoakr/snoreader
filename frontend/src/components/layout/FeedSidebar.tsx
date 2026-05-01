@@ -123,7 +123,9 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         >
           <span>✧ Unrecommend</span>
           {!!unrecommendedCount && (
-            <span className="text-xs text-gray-400 tabular-nums">{unrecommendedCount}</span>
+            <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+              {unrecommendedCount}
+            </span>
           )}
         </button>
 
