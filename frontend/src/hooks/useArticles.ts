@@ -39,6 +39,7 @@ export function useUpdateArticle() {
       );
       qc.invalidateQueries({ queryKey: ['feeds'] });
       qc.invalidateQueries({ queryKey: ['recommended-count'] });
+      qc.invalidateQueries({ queryKey: ['unrecommended-count'] });
       qc.invalidateQueries({ queryKey: ['saved-count'] });
       qc.invalidateQueries({ queryKey: ['article', id] });
     },
@@ -52,6 +53,8 @@ export function useMarkAllRead() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['feeds'] });
+      qc.invalidateQueries({ queryKey: ['recommended-count'] });
+      qc.invalidateQueries({ queryKey: ['unrecommended-count'] });
     },
   });
 }

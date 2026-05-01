@@ -205,6 +205,12 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
                 <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'desc' })} className={filterBtnClass(filters.sort === 'date')}>Date</button>
               </>
             )}
+            {filters.unrecommended && (
+              <>
+                <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'desc' })} className={filterBtnClass(!filters.order || filters.order === 'desc')}>New</button>
+                <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'asc' })} className={filterBtnClass(filters.order === 'asc')}>Old</button>
+              </>
+            )}
             <div className="flex-1" />
             <span className="text-xs text-gray-400">{total}</span>
             {selectedTag ? (
