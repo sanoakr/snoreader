@@ -11,9 +11,10 @@ interface Props {
   filters: ArticleFilters;
   onFilterChange: (f: ArticleFilters) => void;
   tagLang: 'en' | 'ja';
+  onTotalChange?: (total: number) => void;
 }
 
-export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
+export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }: Props) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,18 +53,22 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
     ? (searchResults.data?.total ?? 0)
     : (data?.pages[0]?.total ?? 0);
 
-  // When a background refetch removes the selected article (e.g. Unread view after mark-as-read),
-  // keep it visible by prepending the pinned copy.
+  // When a background refetch removes the selected article (e.g. Unread view
+  // after mark-as-read), keep it visible by prepending the pinned copy so
+  // prev/next navigation and the floating controls keep working.
   const displayArticles = useMemo(() => {
-    const pinned = pinnedArticleRef.current;
-    if (!pinned || !selectedId || pinned.id !== selectedId) return articles;
-    const freshVersion = articles.find(a => a.id === pinned.id);
+    if (!selectedId) return articles;
+    const freshVersion = articles.find(a => a.id === selectedId);
     if (freshVersion) {
-      // Update pin with fresh data for next time
+      // 常に最新の選択記事を pin しておく。スワイプ/j-k 連続移動でも追従する。
       pinnedArticleRef.current = freshVersion;
       return articles;
     }
-    return [pinned, ...articles];
+    const pinned = pinnedArticleRef.current;
+    if (pinned && pinned.id === selectedId) {
+      return [pinned, ...articles];
+    }
+    return articles;
   }, [articles, selectedId]);
 
   // Reset scroll on filter/search change, clear pinned article, and auto-select first article
@@ -72,6 +77,11 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
     pinnedArticleRef.current = null;
     setSelectedId(null);
   }, [filters, searchQuery]);
+
+  // Report current view total to the parent (used by the mobile header)
+  useEffect(() => {
+    onTotalChange?.(total);
+  }, [total, onTotalChange]);
 
   // Auto-select the first article when the article list loads after a filter change
   useEffect(() => {
@@ -281,10 +291,7 @@ export function ArticleList({ filters, onFilterChange, tagLang }: Props) {
               key={article.id}
               article={article}
               isSelected={article.id === selectedId}
-              onClick={() => {
-                pinnedArticleRef.current = article;
-                setSelectedId(article.id);
-              }}
+              onClick={() => setSelectedId(article.id)}
               dimRead={!filters.is_saved}
             />
           ))}
