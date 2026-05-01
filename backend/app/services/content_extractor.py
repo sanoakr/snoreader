@@ -35,6 +35,12 @@ _BROWSER_HEADERS = {
     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
 }
 
+# <meta charset="..."> / <meta http-equiv="Content-Type" content="text/html; charset=..."> の宣言を拾う
+_META_CHARSET_RE = re.compile(
+    rb'<meta[^>]+?charset=["\']?\s*([A-Za-z0-9_\-:]+)',
+    re.IGNORECASE,
+)
+
 
 def _fix_html(html: str, base_url: str = "") -> str:
     """Convert trafilatura-specific tags to standard HTML and fix image URLs."""
@@ -185,12 +191,24 @@ def _decoded_html(resp: httpx.Response) -> str | bytes:
     """Return HTML decoded with the response's declared encoding when available.
 
     trafilatura/lxml の自動検出は EUC-JP / Shift_JIS のページで誤判定して文字化け
-    することがある。HTTP レスポンスの Content-Type に charset がある場合は httpx
-    がそれに従って ``.text`` を返すため、テキストを優先して trafilatura に渡す。
-    宣言が無く検出にも失敗した場合のみ生バイトへフォールバックする。
+    することがある。決定順は以下:
+
+    1. HTTP レスポンスヘッダに charset がある → httpx の ``.text`` を使う
+    2. HTML 内の ``<meta charset>`` 宣言を読み取り、その encoding で decode
+    3. どちらも無ければ生バイトを返し、trafilatura 側の自動検出に任せる
     """
     if resp.charset_encoding:
         return resp.text
+    m = _META_CHARSET_RE.search(resp.content[:4096])
+    if m:
+        declared = m.group(1).decode("ascii", errors="ignore").strip().lower()
+        # Python は "shift_jis" も "sjis" も解決できるが、一部の別名はそうではない
+        alias = {"shift-jis": "shift_jis", "x-sjis": "shift_jis"}
+        encoding = alias.get(declared, declared)
+        try:
+            return resp.content.decode(encoding, errors="replace")
+        except (LookupError, UnicodeDecodeError):
+            pass
     return resp.content
 
 
