@@ -136,7 +136,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             filters.is_saved === true && filters.tag_id == null && !filters.untagged ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
-          <span>Saved</span>
+          <span>★ Saved</span>
           {!!savedCount && (
             <span className="text-xs text-gray-400 tabular-nums">{savedCount}</span>
           )}
