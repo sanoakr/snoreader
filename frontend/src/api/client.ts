@@ -57,6 +57,7 @@ export function getArticles(
   if (filters.is_read != null) params.set('is_read', String(filters.is_read));
   if (filters.is_saved != null) params.set('is_saved', String(filters.is_saved));
   if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
+  if (filters.untagged) params.set('untagged', 'true');
   if (filters.sort) params.set('sort', filters.sort);
   if (filters.order) params.set('order', filters.order);
   params.set('offset', String(offset));

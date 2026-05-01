@@ -61,6 +61,7 @@ export interface ArticleFilters {
   is_read?: boolean;
   is_saved?: boolean;
   tag_id?: number;
+  untagged?: boolean;
   sort?: string;
   order?: string;
   recommended?: boolean;
