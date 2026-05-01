@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
 import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus } from '../../hooks/useArticles';
-import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useFillTagTranslations } from '../../hooks/useTags';
+import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
 
@@ -25,6 +25,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const renameTag = useRenameTag();
   const bulkDeleteTags = useBulkDeleteTags();
   const aiTagSaved = useAiTagSaved();
+  const autoTagSaved = useAutoTagSaved();
   const fillTranslations = useFillTagTranslations();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -169,6 +170,14 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                       title="Translate English tags to Japanese"
                     >
                       {fillTranslations.isPending ? 'Translating...' : fillTranslations.isSuccess ? 'Done' : 'JA補完'}
+                    </button>
+                    <button
+                      onClick={() => autoTagSaved.mutate()}
+                      disabled={autoTagSaved.isPending}
+                      className="text-xs text-green-400 hover:text-green-600 disabled:opacity-50"
+                      title="Auto-tag untagged Saved articles via existing-tag keyword match"
+                    >
+                      {autoTagSaved.isPending ? 'Matching...' : autoTagSaved.isSuccess ? `+${autoTagSaved.data.attached} on ${autoTagSaved.data.processed}` : 'Auto tag'}
                     </button>
                     <button
                       onClick={() => aiTagSaved.mutate()}

@@ -68,6 +68,18 @@ export function useAiTagSaved() {
   });
 }
 
+export function useAutoTagSaved() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.autoTagSaved,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tags'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      qc.invalidateQueries({ queryKey: ['article'] });
+    },
+  });
+}
+
 export function useFillTagTranslations() {
   const qc = useQueryClient();
   return useMutation({
