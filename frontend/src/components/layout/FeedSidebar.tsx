@@ -148,11 +148,11 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         {tags && tags.length > 0 && (
           <>
             <div className="flex items-center justify-between px-3 pt-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-400">Tags</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500 dark:text-gray-400">Tags</span>
                 <button
                   onClick={onToggleTagLang}
-                  className="flex items-center text-[10px] gap-0.5 px-1 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:border-gray-400 leading-none"
+                  className="flex items-center text-xs gap-0.5 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:border-gray-400 leading-none"
                   title="Toggle tag language"
                 >
                   <span className={tagLang === 'en' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>EN</span>
@@ -160,44 +160,42 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                   <span className={tagLang === 'ja' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>JA</span>
                 </button>
               </div>
-              <div className="flex items-center gap-1">
-                {tagManageMode && (
-                  <>
-                    <button
-                      onClick={() => fillTranslations.mutate()}
-                      disabled={fillTranslations.isPending}
-                      className="text-xs text-blue-400 hover:text-blue-600 disabled:opacity-50"
-                      title="Translate English tags to Japanese"
-                    >
-                      {fillTranslations.isPending ? 'Translating...' : fillTranslations.isSuccess ? 'Done' : 'JA補完'}
-                    </button>
-                    <button
-                      onClick={() => autoTagSaved.mutate()}
-                      disabled={autoTagSaved.isPending}
-                      className="text-xs text-green-400 hover:text-green-600 disabled:opacity-50"
-                      title="Auto-tag untagged Saved articles via existing-tag keyword match"
-                    >
-                      {autoTagSaved.isPending ? 'Matching...' : autoTagSaved.isSuccess ? `+${autoTagSaved.data.attached} on ${autoTagSaved.data.processed}` : 'Auto tag'}
-                    </button>
-                    <button
-                      onClick={() => aiTagSaved.mutate()}
-                      disabled={aiTagSaved.isPending}
-                      className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-                      title="AI tag Saved articles (10 at a time)"
-                    >
-                      {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
-                    </button>
-                  </>
-                )}
+              <button
+                onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}
+                className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
+                title={tagManageMode ? 'Done' : 'Manage tags'}
+              >
+                {tagManageMode ? 'Done' : '⚙'}
+              </button>
+            </div>
+            {tagManageMode && (
+              <div className="flex items-center gap-2 px-3 pt-1 whitespace-nowrap">
                 <button
-                  onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}
-                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
-                  title={tagManageMode ? 'Done' : 'Manage tags'}
+                  onClick={() => fillTranslations.mutate()}
+                  disabled={fillTranslations.isPending}
+                  className="text-xs text-blue-400 hover:text-blue-600 disabled:opacity-50"
+                  title="Translate English tags to Japanese"
                 >
-                  {tagManageMode ? 'Done' : '⚙'}
+                  {fillTranslations.isPending ? 'Translating...' : fillTranslations.isSuccess ? 'Done' : 'JA補完'}
+                </button>
+                <button
+                  onClick={() => autoTagSaved.mutate()}
+                  disabled={autoTagSaved.isPending}
+                  className="text-xs text-green-400 hover:text-green-600 disabled:opacity-50"
+                  title="Auto-tag untagged Saved articles via existing-tag keyword match"
+                >
+                  {autoTagSaved.isPending ? 'Matching...' : autoTagSaved.isSuccess ? `+${autoTagSaved.data.attached} on ${autoTagSaved.data.processed}` : 'Auto tag'}
+                </button>
+                <button
+                  onClick={() => aiTagSaved.mutate()}
+                  disabled={aiTagSaved.isPending}
+                  className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
+                  title="AI tag Saved articles (10 at a time)"
+                >
+                  {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
                 </button>
               </div>
-            </div>
+            )}
 
             {tagManageMode && (
               <div className="px-3 pb-1 space-y-0.5">
