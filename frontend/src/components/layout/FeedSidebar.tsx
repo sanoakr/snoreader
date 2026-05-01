@@ -142,10 +142,10 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           )}
         </button>
 
-        {/* Tags section */}
+        {/* Tag management section — filter chips live in the Saved view now.
+            Keep rename/delete and batch ops (JA補完 / AI tag) accessible here via ⚙. */}
         {tags && tags.length > 0 && (
           <>
-            {/* Tag section header */}
             <div className="flex items-center justify-between px-3 pt-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-gray-400">Tags</span>
@@ -190,8 +190,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
               </div>
             </div>
 
-            {tagManageMode ? (
-              /* Management mode: rename / delete icons per tag */
+            {tagManageMode && (
               <div className="px-3 pb-1 space-y-0.5">
                 {tags.map((tag) => (
                   <div key={tag.id} className="flex items-center gap-1 group">
@@ -233,30 +232,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                       </>
                     )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              /* Normal mode: compact chips */
-              <div className="px-3 pt-0.5 pb-1 flex flex-wrap gap-1">
-                {tags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    onClick={() => onFilterChange({
-                      ...filters,
-                      feed_id: undefined,
-                      is_saved: undefined,
-                      tag_id: filters.tag_id === tag.id ? undefined : tag.id,
-                      recommended: undefined,
-                      unrecommended: undefined,
-                    })}
-                    className={`px-1.5 py-0.5 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-800 ${
-                      filters.tag_id === tag.id
-                        ? 'bg-gray-200 dark:bg-gray-800 font-semibold text-gray-900 dark:text-gray-100'
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}
-                  >
-                    #{tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
-                  </button>
                 ))}
               </div>
             )}
