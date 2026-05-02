@@ -158,33 +158,35 @@ export function ExtractFailedPanel({ onClose }: Props) {
                         key={article.id}
                         className="rounded border border-gray-200 dark:border-gray-700"
                       >
-                        <div className="flex items-start gap-2 p-2">
-                          <button
-                            onClick={() => setExpandedId(expanded ? null : article.id)}
-                            className="shrink-0 w-5 h-5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs"
-                            title={expanded ? '閉じる' : '詳細を表示'}
-                            aria-label={expanded ? 'Collapse' : 'Expand'}
-                          >
-                            {expanded ? '▼' : '▶'}
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <a
-                              href={article.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sm text-gray-900 dark:text-gray-100 hover:underline line-clamp-2"
-                              title={article.title}
+                        <div className="p-2">
+                          <div className="flex items-start gap-2">
+                            <button
+                              onClick={() => setExpandedId(expanded ? null : article.id)}
+                              className="shrink-0 w-5 h-5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs"
+                              title={expanded ? '閉じる' : '詳細を表示'}
+                              aria-label={expanded ? 'Collapse' : 'Expand'}
                             >
-                              {article.title || '(untitled)'}
-                            </a>
-                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                              <span className="truncate">{article.feed_title ?? '—'}</span>
-                              <span>·</span>
-                              <span className="truncate">{domain}</span>
-                              {pubDate && <><span>·</span><span>{pubDate}</span></>}
+                              {expanded ? '▼' : '▶'}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <a
+                                href={article.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-sm text-gray-900 dark:text-gray-100 hover:underline line-clamp-2 break-words"
+                                title={article.title}
+                              >
+                                {article.title || '(untitled)'}
+                              </a>
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                <span className="truncate max-w-[10rem]">{article.feed_title ?? '—'}</span>
+                                <span>·</span>
+                                <span className="truncate max-w-[12rem]">{domain}</span>
+                                {pubDate && <><span>·</span><span>{pubDate}</span></>}
+                              </div>
                             </div>
                           </div>
-                          <div className="flex gap-1 shrink-0">
+                          <div className="flex flex-wrap gap-1 mt-2 pl-7">
                             <button
                               disabled={busyId === article.id}
                               onClick={() => runAction(article, 'retry')}
@@ -212,7 +214,7 @@ export function ExtractFailedPanel({ onClose }: Props) {
                           </div>
                         </div>
                         {expanded && (
-                          <div className="px-2 pb-2 pl-9 space-y-2 border-t border-gray-100 dark:border-gray-800 pt-2">
+                          <div className="px-2 pb-2 pl-9 space-y-2 border-t border-gray-100 dark:border-gray-800 pt-2 pr-2">
                             <div className="text-xs text-gray-500 dark:text-gray-400 break-all">
                               <span className="text-gray-400">URL:</span>{' '}
                               <a
