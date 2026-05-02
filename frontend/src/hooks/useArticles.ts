@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as api from '../api/client';
-import type { ArticleFilters, ChatMessage, ExtractAction, PaginatedArticles } from '../types';
+import type { Article, ArticleFilters, ChatMessage, ExtractAction, PaginatedArticles } from '../types';
 
 const ARTICLES_LIMIT = 50;
 
@@ -147,7 +147,21 @@ export function useExtractAction() {
   return useMutation({
     mutationFn: ({ id, action }: { id: number; action: ExtractAction }) =>
       api.extractAction(id, action),
-    onSuccess: () => {
+    // Optimistically drop the row so the center-pane list updates instantly
+    // after retry / skip / delete — otherwise the top item stays visible until
+    // the invalidation refetch lands.
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: ['extract-failed'] });
+      const previous = qc.getQueryData<Article[]>(['extract-failed']);
+      qc.setQueryData<Article[]>(['extract-failed'], (old) =>
+        old ? old.filter(a => a.id !== id) : old,
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['extract-failed'], ctx.previous);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['extract-failed'] });
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['ai-status'] });

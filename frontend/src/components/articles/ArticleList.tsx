@@ -91,8 +91,11 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   // When a background refetch removes the selected article (e.g. Unread view
   // after mark-as-read), keep it visible by prepending the pinned copy so
   // prev/next navigation and the floating controls keep working.
+  // In the extract-failed view we *want* the row to disappear immediately
+  // after retry/skip/delete, so pinning is disabled there.
   const displayArticles = useMemo(() => {
     if (!selectedId) return articles;
+    if (isExtractFailedView) return articles;
     const freshVersion = articles.find(a => a.id === selectedId);
     if (freshVersion) {
       // 常に最新の選択記事を pin しておく。スワイプ/j-k 連続移動でも追従する。
@@ -104,7 +107,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       return [pinned, ...articles];
     }
     return articles;
-  }, [articles, selectedId]);
+  }, [articles, selectedId, isExtractFailedView]);
 
   // Reset scroll on filter/search change, clear pinned article, and auto-select first article
   useEffect(() => {
