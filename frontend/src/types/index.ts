@@ -69,6 +69,7 @@ export interface ArticleFilters {
   order?: string;
   recommended?: boolean;
   unrecommended?: boolean;
+  extract_failed?: boolean;
 }
 
 export interface ChatMessage {
