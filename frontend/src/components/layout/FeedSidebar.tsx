@@ -372,6 +372,17 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         )}
         <input ref={opmlFileRef} type="file" accept=".opml,.xml" onChange={handleOpmlImport} className="hidden" />
         <input ref={articlesFileRef} type="file" accept=".json" onChange={handleArticlesImport} className="hidden" />
+        {aiStatus && (aiStatus.running || aiStatus.pending_summary > 0 || aiStatus.pending_tags > 0) && (
+          <div className="mt-2 px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+            {aiStatus.running && <Spinner size="sm" />}
+            <span>
+              {aiStatus.running ? 'AI処理中' : 'AI待機中'}{' — '}
+              {aiStatus.pending_summary > 0 && `要約 ${aiStatus.pending_summary}件`}
+              {aiStatus.pending_summary > 0 && aiStatus.pending_tags > 0 && ' / '}
+              {aiStatus.pending_tags > 0 && `タグ ${aiStatus.pending_tags}件`}
+            </span>
+          </div>
+        )}
         {extractFailedCount > 0 && (
           <button
             onClick={() => onFilterChange({ extract_failed: true })}
@@ -384,17 +395,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           >
             ⚠ 取得失敗 {extractFailedCount} 件
           </button>
-        )}
-        {aiStatus && (aiStatus.running || aiStatus.pending_summary > 0 || aiStatus.pending_tags > 0) && (
-          <div className="mt-2 px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
-            {aiStatus.running && <Spinner size="sm" />}
-            <span>
-              {aiStatus.running ? 'AI処理中' : 'AI待機中'}{' — '}
-              {aiStatus.pending_summary > 0 && `要約 ${aiStatus.pending_summary}件`}
-              {aiStatus.pending_summary > 0 && aiStatus.pending_tags > 0 && ' / '}
-              {aiStatus.pending_tags > 0 && `タグ ${aiStatus.pending_tags}件`}
-            </span>
-          </div>
         )}
       </div>
     </aside>
