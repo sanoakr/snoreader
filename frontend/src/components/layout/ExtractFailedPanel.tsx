@@ -11,6 +11,7 @@ const STATUS_LABEL: Record<string, string> = {
   not_found: '404 (削除済み)',
   forbidden: '403 (アクセス拒否)',
   error: 'エラー',
+  empty: '本文空 (JS/PDF 等)',
   skipped: 'スキップ済み',
 };
 
@@ -18,6 +19,7 @@ const STATUS_COLOR: Record<string, string> = {
   not_found: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
   forbidden: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
   error: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  empty: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300',
   skipped: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
 };
 
@@ -60,7 +62,7 @@ export function ExtractFailedPanel({ onClose }: Props) {
     const key = a.extract_status ?? 'error';
     (grouped[key] ??= []).push(a);
   }
-  const statusOrder = ['not_found', 'forbidden', 'error', 'skipped'];
+  const statusOrder = ['not_found', 'forbidden', 'error', 'empty', 'skipped'];
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
