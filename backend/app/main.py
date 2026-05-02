@@ -54,6 +54,16 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+        # 既存 DB に追加カラムがなければ ALTER TABLE で足す（create_all は追加しないため）
+        col_rows = await conn.execute(text("PRAGMA table_info(articles)"))
+        existing_article_cols = {row[1] for row in col_rows.fetchall()}
+        if "extract_status" not in existing_article_cols:
+            await conn.execute(text("ALTER TABLE articles ADD COLUMN extract_status TEXT"))
+        if "extract_attempts" not in existing_article_cols:
+            await conn.execute(
+                text("ALTER TABLE articles ADD COLUMN extract_attempts INTEGER DEFAULT 0")
+            )
+
         # 既存 FTS テーブルが古いトークナイザのまま残っていれば作り直す
         existing = await conn.execute(
             text("SELECT sql FROM sqlite_master WHERE name='articles_fts'")

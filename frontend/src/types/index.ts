@@ -38,7 +38,10 @@ export interface Article {
   is_saved: boolean;
   feed_title: string | null;
   rec_score?: number;
+  extract_status?: string | null;
 }
+
+export type ExtractAction = 'retry' | 'skip' | 'delete';
 
 export interface ArticleDetail extends Article {
   content: string | null;
