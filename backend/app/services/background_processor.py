@@ -77,6 +77,11 @@ async def _extract_one() -> bool:
             # 一時的障害: UI 表示用に "error" を記録しつつ、5 分 backoff で再試行。
             article.extract_status = "error"
             _extract_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        elif status is None:
+            # HTTP 200 だが trafilatura が空を返したケース（JS-heavy SPA / PDF など）。
+            # 同じ URL を何度叩いても結果は同じなので恒久失敗扱いにして
+            # Phase 1 の RSS summary フォールバックへ回す。
+            article.extract_status = "empty"
         else:
             # not_found / forbidden は恒久失敗 → WHERE で以後除外される
             article.extract_status = status
@@ -111,7 +116,7 @@ async def _process_one() -> bool:
             .where(
                 Article.ai_summary.is_(None),
                 (Article.content.isnot(None))
-                | (Article.extract_status.in_(["not_found", "forbidden", "skipped"])),
+                | (Article.extract_status.in_(["not_found", "forbidden", "skipped", "empty"])),
             )
             .order_by(Article.is_saved.desc(), Article.is_read.asc(), Article.published_at.desc())
             .limit(1)
