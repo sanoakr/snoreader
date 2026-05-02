@@ -229,15 +229,19 @@ async def get_unrecommended_articles(
 
 @router.get("/articles/extract-failed", response_model=list[ArticleOut])
 async def list_extract_failed(session: AsyncSession = Depends(get_session)):
-    """本文取得に失敗した / スキップ指定された記事一覧。
+    """本文取得に失敗した記事一覧。
 
-    `extract_status` が NULL でない記事をすべて返す。
-    失敗種別 (not_found / forbidden / error / skipped) で優先ソート。
+    `extract_status` が NULL でない記事を返す。ただし "skipped" は
+    ユーザーが明示的に諦めて要約のみへ回した状態なので、ここには含めない。
+    失敗種別 (not_found / forbidden / error / empty) で優先ソート。
     """
     stmt = (
         select(Article, Feed.title.label("feed_title"))
         .join(Feed)
-        .where(Article.extract_status.isnot(None))
+        .where(
+            Article.extract_status.isnot(None),
+            Article.extract_status != "skipped",
+        )
         .order_by(Article.extract_status, Article.published_at.desc())
     )
     rows = (await session.execute(stmt)).all()
