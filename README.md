@@ -7,19 +7,22 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 ## Features
 
 - RSS / Atom feed subscription with automatic refresh (60-minute interval, parallel fetching)
-- 3-pane layout: feed list / article list / article reader
-- Mark articles as read or saved
+- 3-pane layout on desktop, single-pane reader with swipe / floating prev-next on mobile
+- Mark articles read / unread (toggle) or saved
 - Full-text search via SQLite FTS5
-- Article content extraction in reader mode (trafilatura)
+- Article content extraction in reader mode (trafilatura, charset-aware for Shift_JIS / EUC-JP sites)
 - Bilingual tagging — English/Japanese display toggle, manual input with auto-translation
 - AI summary auto-generation (background job, Japanese bullet points)
-- AI tag suggestions (generated from AI summary)
+- AI tag suggestions — existing-tag keyword match (title / body, Unicode-safe) merged with LLM candidates
+- Auto-tag on save — when a previously untagged article is starred, matching existing tags are attached automatically. Bulk re-run available from the sidebar ⚙ menu (`Auto tag`)
 - Article-scoped LLM chat panel with optional DuckDuckGo web search (triggered by keywords like "検索", "最新", "調べて")
-- IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags
+- IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags (coverage ≥ 30%) and a score floor to suppress weak single-tag matches
 - "Unrecommend" view — unread articles with zero saved-tag overlap (sidebar order: All / Recommend / Unrecommend / Saved)
+- Saved view with per-tag filter chips plus an "Untagged" chip
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)
+- Mobile top bar shows the current category, view total, and overall unread count
 - Dark mode support
 
 ## Tech Stack
@@ -101,6 +104,7 @@ make prod   # build frontend + start backend on port 8000
 | `s` | Toggle save |
 | `o` / `Enter` | Open original article in browser |
 | `/` | Focus search |
+| `r` | Refetch articles and feeds |
 
 ## Migrating from Inoreader
 
