@@ -4,7 +4,7 @@ import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import Integer, case, func, select, text, update
+from sqlalchemy import Integer, case, delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -321,7 +321,12 @@ async def update_article(
 
 @router.post("/articles/auto-tag-saved", response_model=dict)
 async def auto_tag_saved_articles(session: AsyncSession = Depends(get_session)):
-    """既存の Saved 記事でタグ未付与のものに、既存タグのキーワードマッチで一括タグ付け。"""
+    """Saved 記事の自動タグ付け。
+
+    - 0 タグ: 既存タグのキーワードマッチで付与（最大 3 件）
+    - 1〜3 タグ: スキップ
+    - 4 タグ以上: 既存タグを全て剥がしてから再マッチ（最大 3 件） — 過去のタグ汚染を一掃する
+    """
     stmt = (
         select(Article)
         .options(selectinload(Article.tags))
@@ -332,8 +337,15 @@ async def auto_tag_saved_articles(session: AsyncSession = Depends(get_session)):
     processed = 0
     attached_total = 0
     for article in saved_articles:
-        if article.tags:
+        current_count = len(article.tags or [])
+        if 1 <= current_count <= 3:
             continue
+        if current_count >= 4:
+            await session.execute(
+                delete(ArticleTag).where(ArticleTag.article_id == article.id)
+            )
+            await session.flush()
+            article.tags = []
         added = await _auto_attach_matching_tags(session, article)
         if added:
             attached_total += added
