@@ -269,6 +269,8 @@ async def _auto_attach_matching_tags(session: AsyncSession, article: Article) ->
         return 0
 
     body_text = article.content or article.ai_summary or article.summary or ""
+    # Auto-tag は付与の暴走を防ぐため 1 記事あたり 3 タグまで。
+    # suggest 側は候補表示なので引き続き 10 件取得する。
     matched = match_existing_tags(all_tags, article.title, body_text)
 
     added = 0
@@ -277,6 +279,8 @@ async def _auto_attach_matching_tags(session: AsyncSession, article: Article) ->
             continue
         session.add(ArticleTag(article_id=article.id, tag_id=tag.id))
         added += 1
+        if added >= 3:
+            break
     return added
 
 
