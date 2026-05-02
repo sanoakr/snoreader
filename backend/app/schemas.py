@@ -76,8 +76,13 @@ class ArticleOut(BaseModel):
     is_saved: bool
     feed_title: str | None = None
     rec_score: float | None = None
+    extract_status: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ExtractActionRequest(BaseModel):
+    action: Literal["retry", "skip", "delete"]
 
 
 class ArticleDetail(ArticleOut):

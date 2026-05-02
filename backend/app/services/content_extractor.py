@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Literal
 from urllib.parse import urljoin
 
 import httpx
 import trafilatura
+
+ExtractStatus = Literal["not_found", "forbidden", "error"]
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +215,15 @@ def _decoded_html(resp: httpx.Response) -> str | bytes:
     return resp.content
 
 
-async def extract_content(url: str) -> str | None:
+async def extract_content(url: str) -> tuple[str | None, ExtractStatus | None]:
     """Fetch a URL and extract the main article text as HTML.
+
+    Returns ``(html, None)`` on success, ``(None, status)`` on failure where
+    status classifies the failure so callers can decide whether to retry:
+
+    - ``"not_found"``  : HTTP 404 (permanent — the resource is gone)
+    - ``"forbidden"``  : HTTP 403 (permanent — bot-detection / paywall)
+    - ``"error"``      : 5xx / timeout / network error (transient — retry ok)
 
     Yahoo pickup pages link to /articles/<hash>, where the full body lives.
     We follow that single hop, then extract directly.
@@ -239,8 +249,16 @@ async def extract_content(url: str) -> str | None:
                     except Exception as e:
                         logger.warning("Failed to fetch %s: %s", next_url, e)
 
-            return _extract_from_html(_decoded_html(resp), str(resp.url))
+            return _extract_from_html(_decoded_html(resp), str(resp.url)), None
 
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        logger.warning("HTTP %s fetching %s", status_code, url)
+        if status_code == 404:
+            return None, "not_found"
+        if status_code == 403:
+            return None, "forbidden"
+        return None, "error"
     except Exception as e:
         logger.warning("Failed to fetch %s: %s", url, e)
-        return None
+        return None, "error"

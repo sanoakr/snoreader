@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as api from '../api/client';
-import type { ArticleFilters, ChatMessage, PaginatedArticles } from '../types';
+import type { ArticleFilters, ChatMessage, ExtractAction, PaginatedArticles } from '../types';
 
 const ARTICLES_LIMIT = 50;
 
@@ -131,5 +131,26 @@ export function useSearchArticles(q: string, filters: { feed_id?: number; is_sav
     queryKey: ['search', q, filters, offset],
     queryFn: () => api.searchArticles(q, filters, offset),
     enabled: q.length > 0,
+  });
+}
+
+export function useExtractFailed() {
+  return useQuery({
+    queryKey: ['extract-failed'],
+    queryFn: api.listExtractFailed,
+    staleTime: 30_000,
+  });
+}
+
+export function useExtractAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: number; action: ExtractAction }) =>
+      api.extractAction(id, action),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['extract-failed'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      qc.invalidateQueries({ queryKey: ['ai-status'] });
+    },
   });
 }

@@ -21,7 +21,12 @@ _SKIP_DURATION = 300  # seconds to skip an article after failure
 _SHORT_CONTENT_THRESHOLD = 300  # summary shorter than this triggers auto-extraction
 
 _processor_task: asyncio.Task[None] | None = None
-_skip_until: dict[int, float] = {}
+# Phase 0 (本文抽出) と Phase 1/2 (LLM) の skip 辞書を分離する。
+# 以前は 1 つの dict を共有しており、本文抽出で 5 分 skip された記事が
+# LLM 要約側でも同時に抑制されてしまい、RSS summary で要約できる記事が
+# 永久にスタックしてしまう問題があった。
+_extract_skip_until: dict[int, float] = {}
+_llm_skip_until: dict[int, float] = {}
 
 
 async def _extract_one() -> bool:
@@ -34,7 +39,7 @@ async def _extract_one() -> bool:
     from app.services.content_extractor import extract_content
 
     now = time.monotonic()
-    skip_ids = [aid for aid, until in _skip_until.items() if until > now]
+    skip_ids = [aid for aid, until in _extract_skip_until.items() if until > now]
 
     async with async_session() as session:
         stmt = (
@@ -42,6 +47,9 @@ async def _extract_one() -> bool:
             .where(
                 Article.content.is_(None),
                 func.coalesce(func.length(Article.summary), 0) < _SHORT_CONTENT_THRESHOLD,
+                # 永続失敗 (not_found / forbidden) と ユーザー skipped 指定は対象外。
+                # null = 未試行, "error" = 一時的障害 (_extract_skip_until で 5 分 backoff)
+                Article.extract_status.is_(None) | (Article.extract_status == "error"),
             )
             .order_by(Article.is_saved.desc(), Article.is_read.asc(), Article.published_at.desc())
         )
@@ -54,19 +62,25 @@ async def _extract_one() -> bool:
         article_id = article.id
         url = article.url
 
-    content = await extract_content(url)
+    content, status = await extract_content(url)
 
     async with async_session() as session:
         article = await session.get(Article, article_id)
         if not article:
             return True
+        article.extract_attempts = (article.extract_attempts or 0) + 1
         if content:
             article.content = content
-            await session.commit()
+            article.extract_status = None
             logger.debug("Auto-extracted content for article %d", article_id)
+        elif status == "error":
+            # 一時的障害: UI 表示用に "error" を記録しつつ、5 分 backoff で再試行。
+            article.extract_status = "error"
+            _extract_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
         else:
-            # Mark as skipped so we don't retry immediately
-            _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+            # not_found / forbidden は恒久失敗 → WHERE で以後除外される
+            article.extract_status = status
+        await session.commit()
 
     return True
 
@@ -81,7 +95,7 @@ async def _process_one() -> bool:
     from app.models import Article, Tag
 
     now = time.monotonic()
-    skip_ids = [aid for aid, until in _skip_until.items() if until > now]
+    skip_ids = [aid for aid, until in _llm_skip_until.items() if until > now]
 
     async with async_session() as session:
         existing_names = list((await session.execute(select(Tag.name))).scalars())
@@ -89,10 +103,16 @@ async def _process_one() -> bool:
         def _skip(stmt):
             return stmt.where(Article.id.not_in(skip_ids)) if skip_ids else stmt
 
-        # Phase 1: articles needing summary + tags (highest priority: saved > unread > newest)
+        # Phase 1: articles needing summary + tags.
+        # 候補は「本文が取得済み or これ以上抽出は試みない」記事のみ。
+        # extract_status が "error" の記事は一時的障害なので Phase 0 で再試行されるまで除外。
         stmt = _skip(
             select(Article)
-            .where(Article.ai_summary.is_(None))
+            .where(
+                Article.ai_summary.is_(None),
+                (Article.content.isnot(None))
+                | (Article.extract_status.in_(["not_found", "forbidden", "skipped"])),
+            )
             .order_by(Article.is_saved.desc(), Article.is_read.asc(), Article.published_at.desc())
             .limit(1)
         )
@@ -127,12 +147,12 @@ async def _process_one() -> bool:
         )
     except Exception as e:
         logger.warning("LLM call failed (phase %d, article %d): %s", phase, article_id, e)
-        _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
         return True
 
     if not summary and not pairs:
         # LLM unavailable or model returned nothing parseable
-        _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
         return True
 
     async with async_session() as session:
@@ -150,7 +170,7 @@ async def _process_one() -> bool:
                 pass
             else:
                 # Both empty — skip this article temporarily
-                _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+                _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
                 return True
         else:  # phase == 2
             if pairs:
@@ -158,7 +178,7 @@ async def _process_one() -> bool:
                 if summary:
                     article.ai_summary = summary  # update if improved
             else:
-                _skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+                _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
                 return True
         await session.commit()
 

@@ -61,6 +61,10 @@ class Article(Base):
     ai_summary: Mapped[str | None] = mapped_column(Text)
     ai_score: Mapped[float | None] = mapped_column(Float)
     tag_suggestions: Mapped[str | None] = mapped_column(String, nullable=True)
+    # null = 未試行 or 成功
+    # "not_found" (404) / "forbidden" (403) / "error" (5xx/timeout/net) / "skipped"
+    extract_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    extract_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
     feed: Mapped["Feed"] = relationship(back_populates="articles")
     tags: Mapped[list["Tag"]] = relationship(secondary="article_tags", back_populates="articles")

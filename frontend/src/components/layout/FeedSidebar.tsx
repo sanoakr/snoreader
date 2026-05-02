@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
-import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus } from '../../hooks/useArticles';
+import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
+import { ExtractFailedPanel } from './ExtractFailedPanel';
 
 interface Props {
   filters: ArticleFilters;
@@ -32,6 +33,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const [tagManageMode, setTagManageMode] = useState(false);
   const [editingTagId, setEditingTagId] = useState<number | null>(null);
   const [editingTagName, setEditingTagName] = useState('');
+  const [showExtractFailed, setShowExtractFailed] = useState(false);
   const opmlFileRef = useRef<HTMLInputElement>(null);
   const articlesFileRef = useRef<HTMLInputElement>(null);
 
@@ -40,6 +42,8 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const { data: unrecommendedCount } = useUnrecommendedCount();
   const { data: savedCount } = useSavedCount();
   const { data: aiStatus } = useAiStatus();
+  const { data: extractFailed } = useExtractFailed();
+  const extractFailedCount = extractFailed?.length ?? 0;
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -370,6 +374,15 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         )}
         <input ref={opmlFileRef} type="file" accept=".opml,.xml" onChange={handleOpmlImport} className="hidden" />
         <input ref={articlesFileRef} type="file" accept=".json" onChange={handleArticlesImport} className="hidden" />
+        {extractFailedCount > 0 && (
+          <button
+            onClick={() => setShowExtractFailed(true)}
+            className="w-full px-2 py-1.5 text-xs text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded text-left"
+            title="本文取得に失敗した記事を確認・対処"
+          >
+            ⚠ 取得失敗 {extractFailedCount} 件
+          </button>
+        )}
         {aiStatus && (aiStatus.running || aiStatus.pending_summary > 0 || aiStatus.pending_tags > 0) && (
           <div className="mt-2 px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
             {aiStatus.running && <Spinner size="sm" />}
@@ -382,6 +395,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           </div>
         )}
       </div>
+      {showExtractFailed && <ExtractFailedPanel onClose={() => setShowExtractFailed(false)} />}
     </aside>
   );
 }

@@ -19,6 +19,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags (coverage ≥ 30%) and a score floor to suppress weak single-tag matches
 - "Unrecommend" view — unread articles with zero saved-tag overlap (sidebar order: All / Recommend / Unrecommend / Saved)
 - Saved view with per-tag filter chips plus an "Untagged" chip
+- Extract-failure management UI — articles whose body fetch failed are classified (404 / 403 / transient error / user-skipped) and surfaced in a sidebar modal with per-article **retry / summary-only / delete** actions, plus bulk ops. Transient errors auto-retry after a 5-minute backoff; permanent failures stop blocking LLM summarization so Phase 1 falls back to the RSS summary
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)

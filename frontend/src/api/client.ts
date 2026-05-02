@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ExtractAction, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -130,6 +130,23 @@ export function aiTagSaved(): Promise<{ queued: number; remaining: number }> {
 
 export function autoTagSaved(): Promise<{ processed: number; attached: number }> {
   return fetchJSON(`${BASE}/articles/auto-tag-saved`, { method: 'POST' });
+}
+
+// --- Extract failures ---
+
+export function listExtractFailed(): Promise<Article[]> {
+  return fetchJSON(`${BASE}/articles/extract-failed`);
+}
+
+export function extractAction(
+  articleId: number,
+  action: ExtractAction,
+): Promise<{ status: string; article_id: number }> {
+  return fetchJSON(`${BASE}/articles/${articleId}/extract-action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
 }
 
 export function fillTagTranslations(): Promise<{ translating?: number; translated?: number }> {

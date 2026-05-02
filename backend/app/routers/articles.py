@@ -24,6 +24,7 @@ from app.schemas import (
     ArticleOut,
     ArticleUpdate,
     ChatSource,
+    ExtractActionRequest,
     MarkAllReadRequest,
     PaginatedArticles,
     TagSuggestion,
@@ -226,6 +227,62 @@ async def get_unrecommended_articles(
     return PaginatedArticles(items=items, total=total, offset=offset, limit=limit)
 
 
+@router.get("/articles/extract-failed", response_model=list[ArticleOut])
+async def list_extract_failed(session: AsyncSession = Depends(get_session)):
+    """本文取得に失敗した / スキップ指定された記事一覧。
+
+    `extract_status` が NULL でない記事をすべて返す。
+    失敗種別 (not_found / forbidden / error / skipped) で優先ソート。
+    """
+    stmt = (
+        select(Article, Feed.title.label("feed_title"))
+        .join(Feed)
+        .where(Article.extract_status.isnot(None))
+        .order_by(Article.extract_status, Article.published_at.desc())
+    )
+    rows = (await session.execute(stmt)).all()
+    items: list[ArticleOut] = []
+    for row in rows:
+        article, feed_title = row[0], row[1]
+        out = ArticleOut.model_validate(article)
+        out.feed_title = feed_title
+        items.append(out)
+    return items
+
+
+@router.post("/articles/{article_id}/extract-action", response_model=dict)
+async def extract_action(
+    article_id: int,
+    body: ExtractActionRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """取得失敗記事に対する手動アクション: retry / skip / delete。"""
+    article = await session.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    if body.action == "retry":
+        # extract_status を NULL に戻し、Phase 0 の一時 skip もクリア。
+        article.extract_status = None
+        from app.services import background_processor as _bp
+        _bp._extract_skip_until.pop(article_id, None)
+        await session.commit()
+        return {"status": "retry_queued", "article_id": article_id}
+
+    if body.action == "skip":
+        # 本文抽出は諦め、RSS summary から LLM 要約を生成する状態にする。
+        article.extract_status = "skipped"
+        await session.commit()
+        return {"status": "skipped", "article_id": article_id}
+
+    if body.action == "delete":
+        await session.delete(article)
+        await session.commit()
+        return {"status": "deleted", "article_id": article_id}
+
+    raise HTTPException(status_code=400, detail="Invalid action")
+
+
 @router.get("/articles/{article_id}", response_model=ArticleDetail)
 async def get_article(article_id: int, session: AsyncSession = Depends(get_session)):
     article = await session.get(Article, article_id)
@@ -234,7 +291,7 @@ async def get_article(article_id: int, session: AsyncSession = Depends(get_sessi
 
     if not article.content and article.url and not article.url.startswith("snoreader://"):
         from app.services.content_extractor import extract_content
-        content = await extract_content(article.url)
+        content, _status = await extract_content(article.url)
         if content:
             article.content = content
             await session.commit()
@@ -385,7 +442,7 @@ async def extract_article_content(
 
     from app.services.content_extractor import extract_content
 
-    content = await extract_content(article.url)
+    content, _status = await extract_content(article.url)
     if content:
         article.content = content
 
