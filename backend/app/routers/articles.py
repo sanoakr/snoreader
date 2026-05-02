@@ -4,7 +4,7 @@ import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import Integer, case, delete, func, select, text, update
+from sqlalchemy import Integer, case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -341,11 +341,10 @@ async def auto_tag_saved_articles(session: AsyncSession = Depends(get_session)):
         if 1 <= current_count <= 3:
             continue
         if current_count >= 4:
-            await session.execute(
-                delete(ArticleTag).where(ArticleTag.article_id == article.id)
-            )
-            await session.flush()
+            # ORM の関係代入に任せて article_tags の DELETE を生成させる。
+            # 直接 delete() すると ORM の関係キャッシュと食い違い StaleDataError になる。
             article.tags = []
+            await session.flush()
         added = await _auto_attach_matching_tags(session, article)
         if added:
             attached_total += added
