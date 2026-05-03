@@ -69,6 +69,10 @@ export function getArticle(id: number): Promise<ArticleDetail> {
   return fetchJSON(`${BASE}/articles/${id}`);
 }
 
+export function getRelatedArticles(id: number, limit = 3): Promise<Article[]> {
+  return fetchJSON(`${BASE}/articles/${id}/related?limit=${limit}`);
+}
+
 export function updateArticle(id: number, data: { is_read?: boolean; is_saved?: boolean }): Promise<Article> {
   return fetchJSON(`${BASE}/articles/${id}`, {
     method: 'PATCH',

@@ -80,6 +80,15 @@ export function useExtractContent() {
   });
 }
 
+export function useRelatedArticles(id: number | null, limit = 3) {
+  return useQuery({
+    queryKey: ['related', id, limit],
+    queryFn: () => api.getRelatedArticles(id as number, limit),
+    enabled: id != null,
+    staleTime: 60_000,
+  });
+}
+
 export function useSuggestTags() {
   return useMutation({
     mutationFn: (id: number) => api.suggestTags(id),
