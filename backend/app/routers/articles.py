@@ -344,7 +344,7 @@ async def get_related_articles(
         rows = []
 
     if not rows:
-        # タグマッチ0件のフォールバック: 同じフィードの Saved 記事を返す
+        # タグマッチ0件のフォールバック1: 同じフィードの Saved 記事を返す
         stmt = (
             select(Article, Feed.title.label("feed_title"))
             .join(Feed)
@@ -352,6 +352,20 @@ async def get_related_articles(
                 Article.is_saved == True,  # noqa: E712
                 Article.id != article_id,
                 Article.feed_id == source.feed_id,
+            )
+            .order_by(func.random())
+            .limit(limit)
+        )
+        rows = (await session.execute(stmt)).all()
+
+    if not rows:
+        # フォールバック2: 全フィードからランダムに Saved 記事を返す
+        stmt = (
+            select(Article, Feed.title.label("feed_title"))
+            .join(Feed)
+            .where(
+                Article.is_saved == True,  # noqa: E712
+                Article.id != article_id,
             )
             .order_by(func.random())
             .limit(limit)
