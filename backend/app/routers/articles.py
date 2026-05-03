@@ -287,6 +287,70 @@ async def extract_action(
     raise HTTPException(status_code=400, detail="Invalid action")
 
 
+@router.get("/articles/{article_id}/related", response_model=list[ArticleOut])
+async def get_related_articles(
+    article_id: int,
+    limit: int = Query(3, ge=1, le=10),
+    session: AsyncSession = Depends(get_session),
+):
+    """類似タグを持つ Saved 記事をランダムに返す。
+
+    - 参照記事に手動タグが付いていればそれを使う
+    - 付いていなければ `tag_suggestions` (AI 候補) をフォールバックに使う
+    - 一致は「タグ名が 1 つ以上重複」で十分とする（多様性重視）
+    - ORDER BY RANDOM() で抽選し、自分自身は除外
+    """
+    import json as _json
+
+    source = await session.get(Article, article_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Collect tag names (manual first, then AI suggestions fallback)
+    manual_names: list[str] = list(
+        (
+            await session.execute(
+                select(Tag.name)
+                .join(ArticleTag, Tag.id == ArticleTag.tag_id)
+                .where(ArticleTag.article_id == article_id)
+            )
+        ).scalars()
+    )
+    tag_names: list[str] = manual_names
+    if not tag_names and source.tag_suggestions:
+        try:
+            tag_names = _json.loads(source.tag_suggestions) or []
+        except (ValueError, TypeError):
+            tag_names = []
+
+    if not tag_names:
+        return []
+
+    stmt = (
+        select(Article, Feed.title.label("feed_title"))
+        .join(Feed)
+        .where(
+            Article.is_saved == True,  # noqa: E712
+            Article.id != article_id,
+            Article.id.in_(
+                select(ArticleTag.article_id)
+                .join(Tag, Tag.id == ArticleTag.tag_id)
+                .where(Tag.name.in_(tag_names))
+            ),
+        )
+        .order_by(func.random())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    items: list[ArticleOut] = []
+    for row in rows:
+        article, feed_title = row[0], row[1]
+        out = ArticleOut.model_validate(article)
+        out.feed_title = feed_title
+        items.append(out)
+    return items
+
+
 @router.get("/articles/{article_id}", response_model=ArticleDetail)
 async def get_article(article_id: int, session: AsyncSession = Depends(get_session)):
     article = await session.get(Article, article_id)

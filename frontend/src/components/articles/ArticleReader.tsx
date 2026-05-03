@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
-import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useExtractContent } from '../../hooks/useArticles';
+import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useExtractContent, useRelatedArticles } from '../../hooks/useArticles';
 import { Spinner } from '../common/Spinner';
 import { useAddTag, useRemoveTag, useTags } from '../../hooks/useTags';
 import { ArticleChatPanel } from './ArticleChatPanel';
@@ -13,9 +13,10 @@ interface Props {
   aiAvailable: boolean;
   onPrev?: () => void;
   onNext?: () => void;
+  onSelect?: (id: number) => void;
 }
 
-export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext }: Props) {
+export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -37,6 +38,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
   const addTag = useAddTag();
   const removeTag = useRemoveTag();
   const { data: existingTags } = useTags();
+  const { data: relatedArticles } = useRelatedArticles(articleId);
   const [tagInput, setTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
   const [suggestedTags, setSuggestedTags] = useState<TagSuggestion[]>([]);
@@ -387,6 +389,42 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext 
           <div className="text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-wrap">
             {article.summary || 'No content available.'}
           </div>
+        )}
+
+        {/* Related saved articles — タグ一致でランダム抽選。本文との区別は
+            上の罫線と淡い背景カードで明示する */}
+        {relatedArticles && relatedArticles.length > 0 && (
+          <aside className="mt-10 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+              Related saved
+            </h2>
+            <ul className="space-y-1.5">
+              {relatedArticles.map((r) => {
+                const date = r.published_at
+                  ? new Date(r.published_at).toLocaleDateString('ja-JP', {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                    })
+                  : '';
+                return (
+                  <li key={r.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect?.(r.id)}
+                      className="w-full text-left px-3 py-2 rounded bg-gray-50 dark:bg-gray-900/40 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    >
+                      <div className="text-sm text-gray-800 dark:text-gray-200 line-clamp-2">
+                        {r.title}
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                        {r.feed_title && <span className="truncate">{r.feed_title}</span>}
+                        {date && <span className="shrink-0">{date}</span>}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
         )}
       </article>
 

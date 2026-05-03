@@ -445,6 +445,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
               aiAvailable={aiAvailable}
               onPrev={hasPrev ? () => goPrev(currentIndex) : undefined}
               onNext={hasNext ? () => goNext(currentIndex) : undefined}
+              onSelect={(id) => setSelectedId(id)}
             />
           </>
         ) : (
