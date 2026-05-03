@@ -386,14 +386,15 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         {extractFailedCount > 0 && (
           <button
             onClick={() => onFilterChange({ extract_failed: true })}
-            className={`w-full px-2 py-1.5 text-xs rounded text-left ${
+            className={`w-full px-2 py-1.5 text-xs rounded flex justify-between items-center ${
               filters.extract_failed
                 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-semibold'
                 : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20'
             }`}
             title="本文取得に失敗した記事を確認・対処"
           >
-            ⚠ 取得失敗 {extractFailedCount} 件
+            <span>⚠ 取得失敗</span>
+            <span>{extractFailedCount} 件</span>
           </button>
         )}
       </div>

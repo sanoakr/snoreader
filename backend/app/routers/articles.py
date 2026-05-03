@@ -323,25 +323,40 @@ async def get_related_articles(
         except (ValueError, TypeError):
             tag_names = []
 
-    if not tag_names:
-        return []
-
-    stmt = (
-        select(Article, Feed.title.label("feed_title"))
-        .join(Feed)
-        .where(
-            Article.is_saved == True,  # noqa: E712
-            Article.id != article_id,
-            Article.id.in_(
-                select(ArticleTag.article_id)
-                .join(Tag, Tag.id == ArticleTag.tag_id)
-                .where(Tag.name.in_(tag_names))
-            ),
+    if tag_names:
+        stmt = (
+            select(Article, Feed.title.label("feed_title"))
+            .join(Feed)
+            .where(
+                Article.is_saved == True,  # noqa: E712
+                Article.id != article_id,
+                Article.id.in_(
+                    select(ArticleTag.article_id)
+                    .join(Tag, Tag.id == ArticleTag.tag_id)
+                    .where(Tag.name.in_(tag_names))
+                ),
+            )
+            .order_by(func.random())
+            .limit(limit)
         )
-        .order_by(func.random())
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).all()
+        rows = (await session.execute(stmt)).all()
+    else:
+        rows = []
+
+    if not rows:
+        # タグマッチ0件のフォールバック: 同じフィードの Saved 記事を返す
+        stmt = (
+            select(Article, Feed.title.label("feed_title"))
+            .join(Feed)
+            .where(
+                Article.is_saved == True,  # noqa: E712
+                Article.id != article_id,
+                Article.feed_id == source.feed_id,
+            )
+            .order_by(func.random())
+            .limit(limit)
+        )
+        rows = (await session.execute(stmt)).all()
     items: list[ArticleOut] = []
     for row in rows:
         article, feed_title = row[0], row[1]

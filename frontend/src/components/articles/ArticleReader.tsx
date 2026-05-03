@@ -201,7 +201,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
       ref={containerRef}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className="h-screen overflow-y-auto pt-12 md:pt-0"
+      className="h-full overflow-y-auto overscroll-contain pt-12 md:pt-0"
     >
       <article className="relative max-w-3xl mx-auto p-6">
         <header className="mb-6">
