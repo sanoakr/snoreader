@@ -46,18 +46,39 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   const listRef = useRef<HTMLDivElement>(null);
   // Keeps the selected article visible across background refetches (e.g. in Unread view)
   const pinnedArticleRef = useRef<Article | null>(null);
-  // Retains articles that appeared in the Unread view until the filter changes,
-  // so read articles stay visible (grayed out) instead of disappearing on refetch.
-  const seenArticlesRef = useRef<Map<number, Article>>(new Map());
 
   const isExtractFailedView = !!filters.extract_failed;
+  const isUnreadView = filters.is_read === false && !isExtractFailedView;
   const {
     data,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isLoading: isArticlesLoading,
-  } = useArticles(isExtractFailedView ? { ...filters, extract_failed: undefined } : filters);
+    refetch: refetchArticles,
+  } = useArticles(
+    isExtractFailedView ? { ...filters, extract_failed: undefined } : filters,
+    isUnreadView,
+  );
+
+  // Pull-to-refresh for Unread view (where auto-refetch is disabled)
+  const pullStartYRef = useRef<number | null>(null);
+  const [isPulling, setIsPulling] = useState(false);
+  const handleListTouchStart = (e: React.TouchEvent) => {
+    if (!isUnreadView) return;
+    if ((listRef.current?.scrollTop ?? 0) === 0) {
+      pullStartYRef.current = e.touches[0].clientY;
+    }
+  };
+  const handleListTouchEnd = (e: React.TouchEvent) => {
+    if (!isUnreadView || pullStartYRef.current === null) return;
+    const dy = e.changedTouches[0].clientY - pullStartYRef.current;
+    pullStartYRef.current = null;
+    if (dy > 60) {
+      setIsPulling(true);
+      refetchArticles().finally(() => setIsPulling(false));
+    }
+  };
 
   const extractFailed = useExtractFailed();
   const extractAct = useExtractAction();
@@ -91,60 +112,28 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       ? (searchResults.data?.total ?? 0)
       : (data?.pages[0]?.total ?? 0);
 
-  // Accumulate seen articles so read articles stay visible (grayed out) in
-  // Unread view until the user explicitly changes the filter.
-  // Disabled for extract-failed view and search, where freshness matters.
-  const isUnreadView = filters.is_read === false && !isExtractFailedView && !isSearching;
-  if (isUnreadView) {
-    for (const a of articles) {
-      seenArticlesRef.current.set(a.id, a);
-    }
-  }
-
   // When a background refetch removes the selected article (e.g. Unread view
   // after mark-as-read), keep it visible by prepending the pinned copy so
   // prev/next navigation and the floating controls keep working.
   // In the extract-failed view we *want* the row to disappear immediately
   // after retry/skip/delete, so pinning is disabled there.
   const displayArticles = useMemo(() => {
-    if (isExtractFailedView) return articles;
-
-    if (isUnreadView && seenArticlesRef.current.size > 0) {
-      // Update seen entries with latest data, then append any that dropped off
-      for (const a of articles) {
-        seenArticlesRef.current.set(a.id, a);
-      }
-      const currentIds = new Set(articles.map(a => a.id));
-      const ghosted = [...seenArticlesRef.current.values()].filter(a => !currentIds.has(a.id));
-      const base = ghosted.length > 0 ? [...articles, ...ghosted] : articles;
-
-      if (!selectedId) return base;
-      const freshVersion = base.find(a => a.id === selectedId);
-      if (freshVersion) { pinnedArticleRef.current = freshVersion; return base; }
-      const pinned = pinnedArticleRef.current;
-      if (pinned && pinned.id === selectedId) return [pinned, ...base.filter(a => a.id !== pinned.id)];
-      return base;
-    }
-
     if (!selectedId) return articles;
+    if (isExtractFailedView) return articles;
     const freshVersion = articles.find(a => a.id === selectedId);
     if (freshVersion) {
-      // 常に最新の選択記事を pin しておく。スワイプ/j-k 連続移動でも追従する。
       pinnedArticleRef.current = freshVersion;
       return articles;
     }
     const pinned = pinnedArticleRef.current;
-    if (pinned && pinned.id === selectedId) {
-      return [pinned, ...articles];
-    }
+    if (pinned && pinned.id === selectedId) return [pinned, ...articles];
     return articles;
-  }, [articles, selectedId, isExtractFailedView, isUnreadView]);
+  }, [articles, selectedId, isExtractFailedView]);
 
   // Reset scroll on filter/search change, clear pinned article, and auto-select first article
   useEffect(() => {
     listRef.current?.scrollTo(0, 0);
     pinnedArticleRef.current = null;
-    seenArticlesRef.current = new Map();
     setSelectedId(null);
   }, [filters, searchQuery]);
 
@@ -403,7 +392,13 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
         </div>
 
         {/* Article list */}
-        <div ref={listRef} className="flex-1 overflow-y-auto">
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto"
+          onTouchStart={handleListTouchStart}
+          onTouchEnd={handleListTouchEnd}
+        >
+          {isPulling && <div className="flex justify-center p-2"><Spinner size="sm" /></div>}
           {isLoading && <div className="flex justify-center p-6"><Spinner /></div>}
           {!isLoading && articles.length === 0 && (
             <p className="p-4 text-sm text-gray-400">No articles found</p>
