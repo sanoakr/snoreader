@@ -146,6 +146,9 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
 
   const handleAcceptTag = (suggestion: TagSuggestion) => {
     addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
+    if (!article.is_saved) {
+      updateArticle.mutate({ id: article.id, data: { is_saved: true } });
+    }
     setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
   };
 
@@ -201,7 +204,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
       ref={containerRef}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className="h-full overflow-y-auto overscroll-contain pt-12 md:pt-0"
+      className="h-screen overflow-y-auto overscroll-contain pt-12 md:pt-0"
     >
       <article className="relative max-w-3xl mx-auto p-6">
         <header className="mb-6">
@@ -382,7 +385,14 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
           </div>
         ) : article.content ? (
           <div
-            className="prose dark:prose-invert max-w-none"
+            className="prose dark:prose-invert max-w-none [&_a]:target-blank"
+            ref={(el) => {
+              if (!el) return;
+              el.querySelectorAll('a').forEach(a => {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+              });
+            }}
             dangerouslySetInnerHTML={{ __html: article.content }}
           />
         ) : (

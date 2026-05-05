@@ -1,6 +1,6 @@
 [project]
 name = "snoreader"
-version = "0.9.18"
+version = "0.9.19"
 description = "Self-hosted RSS reader"
 requires-python = ">=3.12"
 dependencies = [

@@ -4,7 +4,7 @@ import type { Article, ArticleFilters, ChatMessage, ExtractAction, PaginatedArti
 
 const ARTICLES_LIMIT = 50;
 
-export function useArticles(filters: ArticleFilters) {
+export function useArticles(filters: ArticleFilters, freezeList = false) {
   return useInfiniteQuery({
     queryKey: ['articles', filters],
     queryFn: ({ pageParam = 0 }) => api.getArticles(filters, pageParam as number, ARTICLES_LIMIT),
@@ -13,7 +13,9 @@ export function useArticles(filters: ArticleFilters) {
       const loaded = allPages.reduce((s, p) => s + p.items.length, 0);
       return loaded < lastPage.total ? loaded : undefined;
     },
-    refetchInterval: 60_000,
+    refetchInterval: freezeList ? false : 60_000,
+    staleTime: freezeList ? Infinity : undefined,
+    refetchOnMount: freezeList ? false : true,
   });
 }
 
