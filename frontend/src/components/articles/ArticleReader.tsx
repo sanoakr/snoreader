@@ -62,6 +62,20 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
     containerRef.current?.scrollTo(0, 0);
   }, [articleId]);
 
+  // Space / Shift+Space scrolls the article pane regardless of focus
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== ' ') return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      e.preventDefault();
+      const amount = window.innerHeight * 0.8;
+      containerRef.current?.scrollBy({ top: e.shiftKey ? -amount : amount, behavior: 'smooth' });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Swipe navigation (mobile) — declarative handlers so they attach once the
   // container div actually renders (useEffect with [] never re-ran after the
   // loading spinner was replaced by the real article DOM).
@@ -148,8 +162,10 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
     addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
     if (!article.is_saved) {
       updateArticle.mutate({ id: article.id, data: { is_saved: true } });
+      setSuggestedTags([]);
+    } else {
+      setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
     }
-    setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
   };
 
   // Existing-tag autocomplete for the manual input field.
