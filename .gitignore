@@ -25,3 +25,6 @@ logs/
 
 # OS
 .DS_Store
+
+# Agent instructions (local only)
+AGENTS.md
