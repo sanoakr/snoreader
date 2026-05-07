@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { FeedSidebar } from './components/layout/FeedSidebar';
 import { ArticleList } from './components/articles/ArticleList';
 import { useFeeds } from './hooks/useFeeds';
 import { useTags } from './hooks/useTags';
 import type { ArticleFilters } from './types';
+
+const SESSION_NAV_KEY = 'snoreader_nav';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,8 +47,24 @@ function useTagLang() {
   return [lang, toggle] as const;
 }
 
+function filtersKey(f: ArticleFilters): string {
+  return JSON.stringify(Object.fromEntries(
+    Object.entries(f).filter(([, v]) => v !== undefined).sort()
+  ));
+}
+
 function AppInner() {
-  const [filters, setFilters] = useState<ArticleFilters>({ is_read: false });
+  const queryClient = useQueryClient();
+  const [filters, setFilters] = useState<ArticleFilters>(() => {
+    try {
+      const stored = sessionStorage.getItem(SESSION_NAV_KEY);
+      if (stored) {
+        sessionStorage.removeItem(SESSION_NAV_KEY);
+        return JSON.parse(stored) as ArticleFilters;
+      }
+    } catch { /* ignore */ }
+    return { is_read: false };
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dark, toggleDark] = useDarkMode();
   const [tagLang, toggleTagLang] = useTagLang();
@@ -78,7 +96,11 @@ function AppInner() {
   }, [filters, feeds, tags, tagLang]);
 
   const handleFilterChange = (f: ArticleFilters) => {
-    setFilters(f);
+    if (filtersKey(f) === filtersKey(filters)) {
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
+    } else {
+      setFilters(f);
+    }
     setSidebarOpen(false);
   };
 
