@@ -61,20 +61,28 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     isUnreadView,
   );
 
-  // Pull-to-refresh for Unread view (where auto-refetch is disabled)
+  const PULL_THRESHOLD = 60;
   const pullStartYRef = useRef<number | null>(null);
   const [isPulling, setIsPulling] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+
   const handleListTouchStart = (e: React.TouchEvent) => {
-    if (!isUnreadView) return;
     if ((listRef.current?.scrollTop ?? 0) === 0) {
       pullStartYRef.current = e.touches[0].clientY;
     }
   };
+  const handleListTouchMove = (e: React.TouchEvent) => {
+    if (pullStartYRef.current === null || isPulling) return;
+    const dy = e.touches[0].clientY - pullStartYRef.current;
+    setPullDistance(dy > 0 ? Math.min(dy, PULL_THRESHOLD * 1.5) : 0);
+  };
   const handleListTouchEnd = (e: React.TouchEvent) => {
-    if (!isUnreadView || pullStartYRef.current === null) return;
-    const dy = e.changedTouches[0].clientY - pullStartYRef.current;
+    const dy = pullStartYRef.current !== null
+      ? e.changedTouches[0].clientY - pullStartYRef.current
+      : 0;
     pullStartYRef.current = null;
-    if (dy > 60) {
+    setPullDistance(0);
+    if (dy >= PULL_THRESHOLD) {
       setIsPulling(true);
       refetchArticles().finally(() => setIsPulling(false));
     }
@@ -224,12 +232,12 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       }
       case 'r': {
         e.preventDefault();
-        queryClient.refetchQueries({ queryKey: ['articles'] });
-        queryClient.refetchQueries({ queryKey: ['feeds'] });
+        try { sessionStorage.setItem('snoreader_nav', JSON.stringify(filters)); } catch { /* ignore */ }
+        window.location.reload();
         break;
       }
     }
-  }, [displayArticles, selectedId, updateArticle, queryClient]);
+  }, [displayArticles, selectedId, updateArticle, queryClient, filters]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -391,14 +399,27 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
           )}
         </div>
 
+        {/* Pull-to-refresh indicator — pinned above the scrollable list */}
+        <div
+          className="overflow-hidden transition-all duration-150 flex items-center justify-center"
+          style={{ height: isPulling ? '36px' : pullDistance > 0 ? `${Math.round(pullDistance * 0.5)}px` : '0px' }}
+        >
+          {isPulling
+            ? <Spinner size="sm" />
+            : pullDistance >= PULL_THRESHOLD
+              ? <span className="text-xs text-blue-400">↑ 離して更新</span>
+              : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
+          }
+        </div>
+
         {/* Article list */}
         <div
           ref={listRef}
           className="flex-1 overflow-y-auto"
           onTouchStart={handleListTouchStart}
+          onTouchMove={handleListTouchMove}
           onTouchEnd={handleListTouchEnd}
         >
-          {isPulling && <div className="flex justify-center p-2"><Spinner size="sm" /></div>}
           {isLoading && <div className="flex justify-center p-6"><Spinner /></div>}
           {!isLoading && articles.length === 0 && (
             <p className="p-4 text-sm text-gray-400">No articles found</p>

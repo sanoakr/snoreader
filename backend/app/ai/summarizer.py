@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = (
     "You are a concise article summarizer. "
     "ALWAYS respond in Japanese, regardless of the article's language. "
-    "Summarize as 3-5 bullet points, each starting with '・'. "
+    "Summarize as EXACTLY 3 bullet points, each starting with '・'. "
     "Focus on key facts and takeaways. Do not add opinions. "
-    "Return ONLY the bullet points in Japanese. "
+    "Return ONLY the 3 bullet points in Japanese. "
     "Do NOT output any English tags, labels, or 'word|translation' pairs. "
     "Do NOT output section headers like 'SUMMARY:' or 'TAGS:'. "
-    "Output ONLY Japanese bullet points starting with '・', nothing else."
+    "Output ONLY exactly 3 Japanese bullet points starting with '・', nothing else."
 )
 
 
