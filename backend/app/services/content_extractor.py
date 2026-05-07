@@ -19,6 +19,11 @@ _ATTR_SRC = re.compile(r'\bsrc="([^"]*)"')
 _ATTR_ALT = re.compile(r'\balt="([^"]*)"')
 _NESTED_PRE = re.compile(r'<pre>\s*<pre>(.*?)</pre>\s*</pre>', re.DOTALL)
 
+# 著者・コメンテーターのプロフィール画像として知られている CDN ホスト
+_PROFILE_IMG_HOSTS = {
+    "byline-pctr.c.yimg.jp",  # Yahoo! ニュース エキスパート著者アイコン
+}
+
 _YAHOO_PICKUP_RE = re.compile(r'https?://news\.yahoo\.co\.jp/pickup/')
 # Match canonical article URLs only — exclude sub-paths like /articles/HASH/images/000
 _YAHOO_ARTICLE_RE = re.compile(r'^https?://news\.yahoo\.co\.jp/articles/[^/?#]+/?(?:[?#].*)?$')
@@ -60,7 +65,7 @@ def _fix_html(html: str, base_url: str = "") -> str:
     html = _GRAPHIC_RE.sub(_graphic_to_img, html)
     html = _NESTED_PRE.sub(r'<pre>\1</pre>', html)
 
-    # Absolutize relative img src and add referrerpolicy for hotlink protection
+    # Absolutize relative img src, add referrerpolicy, and strip known profile-image hosts
     def _fix_img_tag(m: re.Match) -> str:
         tag = m.group(0)
         def _abs_src(sm: re.Match) -> str:
@@ -69,6 +74,10 @@ def _fix_html(html: str, base_url: str = "") -> str:
                 src = urljoin(base_url, src)
             return f'src="{src}"'
         tag = re.sub(r'src="([^"]*)"', _abs_src, tag)
+        # Drop author/commentator profile images by CDN host
+        src_m = re.search(r'src="https?://([^/"]+)', tag)
+        if src_m and src_m.group(1) in _PROFILE_IMG_HOSTS:
+            return ""
         if 'referrerpolicy' not in tag:
             tag = tag.replace('<img', '<img referrerpolicy="no-referrer"', 1)
         return tag

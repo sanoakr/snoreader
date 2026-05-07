@@ -369,13 +369,17 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
           ) : null}
         </header>
 
-        {/* Hero image */}
+        {/* Hero image — 両辺 200px 未満の著者アイコン等は非表示 */}
         {article.image_url && (
           <img
             src={article.image_url}
             alt=""
             referrerPolicy="no-referrer"
             className="w-full max-h-72 object-cover rounded-lg mb-4"
+            onLoad={(e) => {
+              const img = e.target as HTMLImageElement;
+              if (img.naturalWidth < 200 && img.naturalHeight < 200) img.style.display = 'none';
+            }}
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         )}
@@ -407,6 +411,14 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
               el.querySelectorAll('a').forEach(a => {
                 a.target = '_blank';
                 a.rel = 'noopener noreferrer';
+              });
+              // 著者・コメンテーターのプロフィール画像を除去
+              const PROFILE_HOSTS = ['byline-pctr.c.yimg.jp'];
+              el.querySelectorAll('img').forEach(img => {
+                try {
+                  const host = new URL(img.src).hostname;
+                  if (PROFILE_HOSTS.some(h => host === h)) img.remove();
+                } catch { /* ignore */ }
               });
             }}
             dangerouslySetInnerHTML={{ __html: article.content }}
