@@ -1,4 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+const PROFILE_IMG_HOSTS = ['byline-pctr.c.yimg.jp'];
+
+function sanitizeContent(html: string): string {
+  return html.replace(/<img\b[^>]*>/gi, tag => {
+    const m = tag.match(/src="([^"]*)"/i);
+    if (!m) return tag;
+    try {
+      if (PROFILE_IMG_HOSTS.includes(new URL(m[1]).hostname)) return '';
+    } catch { /* ignore */ }
+    return tag;
+  });
+}
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
 import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useExtractContent, useRelatedArticles } from '../../hooks/useArticles';
@@ -31,6 +44,10 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
     queryKey: ['article', articleId],
     queryFn: () => getArticle(articleId),
   });
+  const sanitizedContent = useMemo(
+    () => article?.content ? sanitizeContent(article.content) : null,
+    [article?.content],
+  );
   const updateArticle = useUpdateArticle();
   const summarizeArticle = useSummarizeArticle();
   const extractContent = useExtractContent();
@@ -403,7 +420,7 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
           <div className="flex justify-center py-12">
             <Spinner />
           </div>
-        ) : article.content ? (
+        ) : sanitizedContent ? (
           <div
             className="prose dark:prose-invert max-w-none [&_a]:target-blank"
             ref={(el) => {
@@ -412,16 +429,8 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
                 a.target = '_blank';
                 a.rel = 'noopener noreferrer';
               });
-              // 著者・コメンテーターのプロフィール画像を除去
-              const PROFILE_HOSTS = ['byline-pctr.c.yimg.jp'];
-              el.querySelectorAll('img').forEach(img => {
-                try {
-                  const host = new URL(img.src).hostname;
-                  if (PROFILE_HOSTS.some(h => host === h)) img.remove();
-                } catch { /* ignore */ }
-              });
             }}
-            dangerouslySetInnerHTML={{ __html: article.content }}
+            dangerouslySetInnerHTML={{ __html: sanitizedContent }}
           />
         ) : (
           <div className="text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-wrap">
