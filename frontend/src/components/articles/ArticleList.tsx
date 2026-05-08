@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAiStatus, useArticles, useExtractAction, useExtractFailed, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
 import type { Article, ArticleFilters } from '../../types';
+import { getArticle } from '../../api/client';
 import { ArticleCard } from './ArticleCard';
 import { ArticleReader } from './ArticleReader';
 import { Spinner } from '../common/Spinner';
@@ -189,6 +190,21 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     const prev = idx > 0 ? idx - 1 : 0;
     if (displayArticles[prev]) setSelectedId(displayArticles[prev].id);
   }, [displayArticles]);
+
+  // 隣接記事をプリフェッチしてナビ時のフラッシュを防ぐ
+  useEffect(() => {
+    const prefetch = (idx: number) => {
+      const a = displayArticles[idx];
+      if (a) queryClient.prefetchQuery({ queryKey: ['article', a.id], queryFn: () => getArticle(a.id) });
+    };
+    prefetch(currentIndex + 1);
+    prefetch(currentIndex - 1);
+  }, [currentIndex, displayArticles, queryClient]);
+
+  // ArticleReader に渡す安定コールバック（pullDistance 変化で再レンダリングさせない）
+  const handlePrev = useCallback(() => goPrev(currentIndex), [goPrev, currentIndex]);
+  const handleNext = useCallback(() => goNext(currentIndex), [goNext, currentIndex]);
+  const handleSelect = useCallback((id: number) => setSelectedId(id), []);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -491,9 +507,9 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
               articleId={selectedId}
               tagLang={tagLang}
               aiAvailable={aiAvailable}
-              onPrev={hasPrev ? () => goPrev(currentIndex) : undefined}
-              onNext={hasNext ? () => goNext(currentIndex) : undefined}
-              onSelect={(id) => setSelectedId(id)}
+              onPrev={hasPrev ? handlePrev : undefined}
+              onNext={hasNext ? handleNext : undefined}
+              onSelect={handleSelect}
             />
           </>
         ) : (

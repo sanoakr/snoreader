@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 const PROFILE_IMG_HOSTS = ['byline-pctr.c.yimg.jp'];
 
@@ -29,7 +29,7 @@ interface Props {
   onSelect?: (id: number) => void;
 }
 
-export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext, onSelect }: Props) {
+export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -503,4 +503,4 @@ export function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext,
       {aiAvailable && <ArticleChatPanel articleId={article.id} />}
     </div>
   );
-}
+});

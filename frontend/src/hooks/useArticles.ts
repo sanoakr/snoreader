@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import * as api from '../api/client';
-import type { Article, ArticleFilters, ChatMessage, ExtractAction, PaginatedArticles } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ExtractAction, PaginatedArticles } from '../types';
 
 const ARTICLES_LIMIT = 50;
 
@@ -43,7 +43,10 @@ export function useUpdateArticle() {
       qc.invalidateQueries({ queryKey: ['recommended-count'] });
       qc.invalidateQueries({ queryKey: ['unrecommended-count'] });
       qc.invalidateQueries({ queryKey: ['saved-count'] });
-      qc.invalidateQueries({ queryKey: ['article', id] });
+      // invalidate ではなく in-place マージ — リフェッチによる再レンダリングを避ける
+      qc.setQueryData<ArticleDetail>(['article', id], (old) =>
+        old ? { ...old, ...result } : old,
+      );
     },
   });
 }
