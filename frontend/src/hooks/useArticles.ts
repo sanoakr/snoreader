@@ -22,7 +22,7 @@ export function useArticles(filters: ArticleFilters, freezeList = false) {
 export function useUpdateArticle() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { is_read?: boolean; is_saved?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: number; data: { is_read?: boolean; is_saved?: boolean; auto_tag?: boolean } }) =>
       api.updateArticle(id, data),
     onSuccess: (result, { id }) => {
       // Update article in-place so it stays visible until the user navigates away

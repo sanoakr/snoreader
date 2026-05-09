@@ -73,7 +73,7 @@ export function getRelatedArticles(id: number, limit = 3): Promise<Article[]> {
   return fetchJSON(`${BASE}/articles/${id}/related?limit=${limit}`);
 }
 
-export function updateArticle(id: number, data: { is_read?: boolean; is_saved?: boolean }): Promise<Article> {
+export function updateArticle(id: number, data: { is_read?: boolean; is_saved?: boolean; auto_tag?: boolean }): Promise<Article> {
   return fetchJSON(`${BASE}/articles/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

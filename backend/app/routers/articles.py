@@ -460,8 +460,8 @@ async def update_article(
         article.is_saved = body.is_saved
         article.saved_at = now if body.is_saved else None
 
-    # 新規 Saved 化 + 未タグ付けなら既存タグで自動マッチ
-    if newly_saved:
+    # 新規 Saved 化 + 未タグ付け + auto_tag 許可 → 既存タグで自動マッチ
+    if newly_saved and body.auto_tag:
         existing_tag_ids = (await session.execute(
             select(ArticleTag.tag_id).where(ArticleTag.article_id == article.id)
         )).scalars().all()

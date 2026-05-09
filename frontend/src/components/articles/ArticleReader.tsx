@@ -176,11 +176,19 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
   };
 
   const handleAcceptTag = (suggestion: TagSuggestion) => {
-    addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
     if (!article.is_saved) {
-      updateArticle.mutate({ id: article.id, data: { is_saved: true } });
+      // 未 Saved: auto_tag=false で保存してから clicked tag だけを追加
+      updateArticle.mutate(
+        { id: article.id, data: { is_saved: true, auto_tag: false } },
+        {
+          onSuccess: () => {
+            addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
+          },
+        },
+      );
       setSuggestedTags([]);
     } else {
+      addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
       setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
     }
   };

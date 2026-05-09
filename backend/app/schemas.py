@@ -97,6 +97,7 @@ class ArticleDetail(ArticleOut):
 class ArticleUpdate(BaseModel):
     is_read: bool | None = None
     is_saved: bool | None = None
+    auto_tag: bool = True  # False にすると新規 Saved 時の自動タグ付けをスキップ
 
 
 class MarkAllReadRequest(BaseModel):
