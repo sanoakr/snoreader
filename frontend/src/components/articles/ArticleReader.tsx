@@ -9,6 +9,14 @@ function sanitizeContent(html: string): string {
     try {
       if (PROFILE_IMG_HOSTS.includes(new URL(m[1]).hostname)) return '';
     } catch { /* ignore */ }
+    // min-height で読み込み前の高さ 0 を回避し、CLS を軽減
+    if (!tag.includes('style=')) {
+      tag = tag.replace('<img', '<img style="min-height:40px;"');
+    }
+    // loading="lazy" がなければ追加
+    if (!tag.includes('loading=')) {
+      tag = tag.replace('<img', '<img loading="lazy"');
+    }
     return tag;
   });
 }
@@ -376,7 +384,7 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
             </div>
           )}
 
-          {/* AI Summary */}
+          {/* AI Summary — aiAvailable 時は初期から領域を確保してレイアウトシフトを防ぐ */}
           {article.ai_summary ? (
             <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded text-sm text-gray-700 dark:text-gray-300">
               <span className="text-xs font-medium text-purple-500 block mb-1">AI Summary</span>
@@ -386,27 +394,48 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
                 ))}
               </ul>
             </div>
-          ) : summarizeArticle.isPending ? (
-            <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded flex items-center gap-2">
-              <Spinner size="sm" />
-              <span className="text-xs text-purple-400">Summarizing...</span>
+          ) : aiAvailable ? (
+            <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded">
+              {summarizeArticle.isPending ? (
+                <div className="flex items-center gap-2">
+                  <Spinner size="sm" />
+                  <span className="text-xs text-purple-400">Summarizing...</span>
+                </div>
+              ) : (
+                <div className="space-y-2 animate-pulse">
+                  <div className="h-2.5 bg-purple-200 dark:bg-purple-700/50 rounded w-full" />
+                  <div className="h-2.5 bg-purple-200 dark:bg-purple-700/50 rounded w-11/12" />
+                  <div className="h-2.5 bg-purple-200 dark:bg-purple-700/50 rounded w-4/5" />
+                </div>
+              )}
             </div>
           ) : null}
         </header>
 
-        {/* Hero image — 両辺 200px 未満の著者アイコン等は非表示 */}
+        {/* Hero image — aspect-ratio で高さを事前確保してレイアウトシフトを防ぐ。
+            両辺 200px 未満の著者アイコン等はコンテナごと非表示 */}
         {article.image_url && (
-          <img
-            src={article.image_url}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-full max-h-72 object-cover rounded-lg mb-4"
-            onLoad={(e) => {
-              const img = e.target as HTMLImageElement;
-              if (img.naturalWidth < 200 && img.naturalHeight < 200) img.style.display = 'none';
+          <div
+            className="w-full rounded-lg mb-4 overflow-hidden bg-gray-100 dark:bg-gray-800"
+            style={{ aspectRatio: '16/9', maxHeight: '18rem' }}
+            ref={(el) => {
+              if (!el) return;
+              const img = el.querySelector('img');
+              if (img) {
+                img.onload = () => {
+                  if (img.naturalWidth < 200 && img.naturalHeight < 200) el.style.display = 'none';
+                };
+                img.onerror = () => { el.style.display = 'none'; };
+              }
             }}
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
+          >
+            <img
+              src={article.image_url}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover"
+            />
+          </div>
         )}
 
         {/* Article content */}
