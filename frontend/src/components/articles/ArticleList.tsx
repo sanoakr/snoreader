@@ -496,12 +496,34 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       <div className={`flex-1 min-w-0 ${selectedId ? 'fixed inset-0 z-20 bg-white dark:bg-gray-950 md:relative md:z-auto' : 'hidden md:block'}`}>
         {selectedId ? (
           <>
-            <button
-              onClick={() => setSelectedId(null)}
-              className="md:hidden fixed top-2 left-2 z-30 p-1.5 bg-gray-100 dark:bg-gray-800 rounded"
-            >
-              ← Back
-            </button>
+            <div className="md:hidden fixed top-0 left-0 right-0 z-30 h-12 flex items-center gap-1 px-2 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => setSelectedId(null)}
+                className="p-1.5 bg-gray-100 dark:bg-gray-800 rounded text-sm shrink-0"
+              >
+                ← Back
+              </button>
+              <div className="flex-1" />
+              {!filters.recommended && !filters.unrecommended && !filters.is_saved && (
+                <>
+                  <button onClick={() => onFilterChange({ ...filters, is_read: false })} className={filterBtnClass(filters.is_read === false)}>Unread</button>
+                  <button onClick={() => onFilterChange({ ...filters, is_read: undefined })} className={filterBtnClass(filters.is_read === undefined)}>All</button>
+                  <button onClick={() => onFilterChange({ ...filters, is_read: true })} className={filterBtnClass(filters.is_read === true)}>Read</button>
+                </>
+              )}
+              {filters.recommended && (
+                <>
+                  <button onClick={() => onFilterChange({ ...filters, sort: undefined, order: undefined })} className={filterBtnClass(!filters.sort || filters.sort === 'score')}>Score</button>
+                  <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'desc' })} className={filterBtnClass(filters.sort === 'date')}>Date</button>
+                </>
+              )}
+              {filters.unrecommended && (
+                <>
+                  <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'desc' })} className={filterBtnClass(!filters.order || filters.order === 'desc')}>New</button>
+                  <button onClick={() => onFilterChange({ ...filters, sort: 'date', order: 'asc' })} className={filterBtnClass(filters.order === 'asc')}>Old</button>
+                </>
+              )}
+            </div>
             <ArticleReader
               key={selectedId}
               articleId={selectedId}

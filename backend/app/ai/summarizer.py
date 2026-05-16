@@ -22,12 +22,13 @@ _SYSTEM_PROMPT = (
 
 
 def _clean_summary(raw: str) -> str | None:
-    """Extract only ・-prefixed lines from LLM output, discarding any contamination."""
+    """Extract only ・-prefixed lines from LLM output, capped at exactly 3."""
     lines = [
         line.strip()
         for line in raw.splitlines()
         if line.strip().startswith("・")
     ]
+    lines = lines[:3]
     return "\n".join(lines) if lines else None
 
 

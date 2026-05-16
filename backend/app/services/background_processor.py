@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 _SLEEP_IDLE = 10
 _SKIP_DURATION = 300  # seconds to skip an article after failure
-_SHORT_CONTENT_THRESHOLD = 300  # summary shorter than this triggers auto-extraction
+_SHORT_CONTENT_THRESHOLD = 100  # summary shorter than this triggers auto-extraction
 
 _processor_task: asyncio.Task[None] | None = None
 # Phase 0 (本文抽出) と Phase 1/2 (LLM) の skip 辞書を分離する。

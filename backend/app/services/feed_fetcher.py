@@ -28,15 +28,31 @@ def _parse_date(entry: dict) -> str | None:
     return None
 
 
+_MIN_IMAGE_DIM = 200  # 両辺がこれ未満のサムネイルは著者アイコン扱いでスキップ
+
+
+def _is_icon_sized(mt: dict) -> bool:
+    """幅・高さ両方が _MIN_IMAGE_DIM 未満なら True（情報がなければ False）。"""
+    try:
+        w, h = int(mt.get("width", 0)), int(mt.get("height", 0))
+        return w > 0 and h > 0 and w < _MIN_IMAGE_DIM and h < _MIN_IMAGE_DIM
+    except (ValueError, TypeError):
+        return False
+
+
 def _extract_image(entry: dict) -> str | None:
     """Extract thumbnail/image URL from feed entry."""
     # media:thumbnail
     for mt in entry.get("media_thumbnail", []):
+        if _is_icon_sized(mt):
+            continue
         if url := mt.get("url"):
             return url
     # media:content with image type
     for mc in entry.get("media_content", []):
         if "image" in mc.get("medium", mc.get("type", "")):
+            if _is_icon_sized(mc):
+                continue
             if url := mc.get("url"):
                 return url
     # enclosure
