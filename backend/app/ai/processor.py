@@ -22,7 +22,7 @@ _SYSTEM_PROMPT = (
     "・<bullet point in Japanese>\n"
     "TAGS: <english>|<日本語>, <english>|<日本語>\n\n"
     "Rules:\n"
-    "- SUMMARY: 3-5 Japanese bullet points, key facts only, no opinions\n"
+    "- SUMMARY: EXACTLY 3 Japanese bullet points, key facts only, no opinions\n"
     "- SUMMARY bullets start with '・' and contain ONLY Japanese text — no English|Japanese pairs\n"
     "- TAGS: 1-3 specific topic tags; single lowercase English word (or hyphenated) + Japanese translation\n"
     "- Choose the most specific accurate tag — only use 'ai', 'technology', or 'news' if that is the article's primary subject\n"
@@ -55,7 +55,7 @@ def _parse_output(raw: str) -> tuple[str | None, list[tuple[str, str | None]]]:
             if not _TAG_IN_BULLET.search(stripped):
                 summary_lines.append(stripped)
 
-    summary = "\n".join(summary_lines) if summary_lines else None
+    summary = "\n".join(summary_lines[:3]) if summary_lines else None
 
     pairs: list[tuple[str, str | None]] = []
     for item in re.split(r"[,\n]", tags_str):

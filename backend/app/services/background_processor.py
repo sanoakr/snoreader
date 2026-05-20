@@ -177,11 +177,9 @@ async def _process_one() -> bool:
                 # Both empty — skip this article temporarily
                 _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
                 return True
-        else:  # phase == 2
+        else:  # phase == 2: backfill tags only, never overwrite existing summary
             if pairs:
                 article.tag_suggestions = _json.dumps([en for en, _ in pairs])
-                if summary:
-                    article.ai_summary = summary  # update if improved
             else:
                 _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
                 return True
