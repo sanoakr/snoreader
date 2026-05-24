@@ -35,25 +35,18 @@ interface Props {
   onPrev?: () => void;
   onNext?: () => void;
   onSelect?: (id: number) => void;
-  onRefresh?: () => Promise<void>;
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext, onSelect, onRefresh }: Props) {
+export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, aiAvailable, onPrev, onNext, onSelect, scrollRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
   // Stable refs so the swipe effect only attaches once; always reads latest callbacks
   const onNextRef = useRef(onNext);
   const onPrevRef = useRef(onPrev);
-  const onRefreshRef = useRef(onRefresh);
   useEffect(() => { onNextRef.current = onNext; }, [onNext]);
   useEffect(() => { onPrevRef.current = onPrev; }, [onPrev]);
-  useEffect(() => { onRefreshRef.current = onRefresh; }, [onRefresh]);
-
-  const PULL_THRESHOLD = 60;
-  const pullStartYRef = useRef<number | null>(null);
-  const [isPulling, setIsPulling] = useState(false);
-  const [pullDistance, setPullDistance] = useState(0);
   const summarizeTried = useRef(false);
   const suggestTried = useRef(false);
   const { data: article, isLoading } = useQuery({
@@ -109,41 +102,14 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Swipe navigation (mobile) — declarative handlers so they attach once the
-  // container div actually renders (useEffect with [] never re-ran after the
-  // loading spinner was replaced by the real article DOM).
+  // 水平スワイプで前後記事ナビゲーション (モバイル)
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
-    if ((containerRef.current?.scrollTop ?? 0) === 0) {
-      pullStartYRef.current = e.touches[0].clientY;
-    }
-  };
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (pullStartYRef.current === null || isPulling) return;
-    const dy = e.touches[0].clientY - pullStartYRef.current;
-    const dx = e.touches[0].clientX - touchStartX.current;
-    if (Math.abs(dx) > Math.abs(dy)) { setPullDistance(0); return; }
-    setPullDistance(dy > 0 ? Math.min(dy, PULL_THRESHOLD * 1.5) : 0);
   };
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     const dy = e.changedTouches[0].clientY - touchStartY.current;
-
-    const pullDy = pullStartYRef.current !== null
-      ? e.changedTouches[0].clientY - pullStartYRef.current
-      : 0;
-    pullStartYRef.current = null;
-    setPullDistance(0);
-
-    // 縦方向ドラッグが閾値以上かつ横より大きい場合はプルリフレッシュ
-    if (pullDy >= PULL_THRESHOLD && Math.abs(dy) >= Math.abs(dx) && onRefreshRef.current) {
-      setIsPulling(true);
-      onRefreshRef.current().finally(() => setIsPulling(false));
-      return;
-    }
-
-    // 横スワイプで記事ナビゲーション
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
     if (dx < 0) onNextRef.current?.();
     else onPrevRef.current?.();
@@ -283,24 +249,14 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
 
   return (
     <div
-      ref={containerRef}
+      ref={(el) => {
+        containerRef.current = el;
+        if (scrollRef) scrollRef.current = el;
+      }}
       onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       className="h-screen overflow-y-auto overscroll-contain pt-12 md:pt-0"
     >
-      {/* Pull-to-refresh indicator (モバイルのみ表示) */}
-      <div
-        className="md:hidden overflow-hidden transition-all duration-150 flex items-center justify-center"
-        style={{ height: isPulling ? '36px' : pullDistance > 0 ? `${Math.round(pullDistance * 0.5)}px` : '0px' }}
-      >
-        {isPulling
-          ? <Spinner size="sm" />
-          : pullDistance >= PULL_THRESHOLD
-            ? <span className="text-xs text-blue-400">↑ 離して更新</span>
-            : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
-        }
-      </div>
       <article className="relative max-w-3xl mx-auto p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight mb-2">

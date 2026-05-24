@@ -213,15 +213,54 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     ? displayArticles.find(a => a.id === selectedId)?.feed_id
     : undefined;
 
-  // モバイル記事リーダーのプルリフレッシュ: フィード更新後にリスト表示へ戻る
+  // モバイル記事リーダーのプルリフレッシュ
+  const readerScrollRef = useRef<HTMLDivElement | null>(null);
+  const READER_PULL_THRESHOLD = 60;
+  const readerPullStartYRef = useRef<number | null>(null);
+  const readerPullStartXRef = useRef(0);
+  const [isReaderPulling, setIsReaderPulling] = useState(false);
+  const [readerPullDistance, setReaderPullDistance] = useState(0);
+
+  const handleReaderTouchStart = useCallback((e: React.TouchEvent) => {
+    if ((readerScrollRef.current?.scrollTop ?? 0) <= 1) {
+      readerPullStartYRef.current = e.touches[0].clientY;
+      readerPullStartXRef.current = e.touches[0].clientX;
+    }
+  }, []);
+
+  const handleReaderTouchMove = useCallback((e: React.TouchEvent) => {
+    if (readerPullStartYRef.current === null || isReaderPulling) return;
+    const dy = e.touches[0].clientY - readerPullStartYRef.current;
+    const dx = e.touches[0].clientX - readerPullStartXRef.current;
+    if (Math.abs(dx) > Math.abs(dy)) { setReaderPullDistance(0); return; }
+    setReaderPullDistance(dy > 0 ? Math.min(dy, READER_PULL_THRESHOLD * 1.5) : 0);
+  }, [isReaderPulling]);
+
   const handleReaderRefresh = useCallback(async () => {
-    if (selectedArticleFeedId != null) {
-      await refreshFeed.mutateAsync(selectedArticleFeedId);
-    } else {
-      await refetchArticles();
+    try {
+      if (selectedArticleFeedId != null) {
+        await refreshFeed.mutateAsync(selectedArticleFeedId);
+      } else {
+        await refetchArticles();
+      }
+    } catch {
+      await refetchArticles().catch(() => {});
     }
     setSelectedId(null);
   }, [selectedArticleFeedId, refreshFeed, refetchArticles]);
+
+  const handleReaderTouchEnd = useCallback((e: React.TouchEvent) => {
+    const dy = readerPullStartYRef.current !== null
+      ? e.changedTouches[0].clientY - readerPullStartYRef.current
+      : 0;
+    const dx = e.changedTouches[0].clientX - readerPullStartXRef.current;
+    readerPullStartYRef.current = null;
+    setReaderPullDistance(0);
+    if (dy >= READER_PULL_THRESHOLD && Math.abs(dy) >= Math.abs(dx)) {
+      setIsReaderPulling(true);
+      handleReaderRefresh().finally(() => setIsReaderPulling(false));
+    }
+  }, [handleReaderRefresh]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -510,7 +549,12 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       </div>
 
       {/* Reader panel */}
-      <div className={`flex-1 min-w-0 ${selectedId ? 'fixed inset-0 z-20 bg-white dark:bg-gray-950 md:relative md:z-auto' : 'hidden md:block'}`}>
+      <div
+        className={`flex-1 min-w-0 ${selectedId ? 'fixed inset-0 z-20 bg-white dark:bg-gray-950 md:relative md:z-auto' : 'hidden md:block'}`}
+        onTouchStart={selectedId ? handleReaderTouchStart : undefined}
+        onTouchMove={selectedId ? handleReaderTouchMove : undefined}
+        onTouchEnd={selectedId ? handleReaderTouchEnd : undefined}
+      >
         {selectedId ? (
           <>
             <div className="md:hidden fixed top-0 left-0 right-0 z-30 h-12 flex items-center gap-1 px-2 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-700">
@@ -541,6 +585,21 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                 </>
               )}
             </div>
+            {/* Pull-to-refresh indicator (モバイルのみ、ヘッダー直下に固定表示) */}
+            <div
+              className="md:hidden fixed left-0 right-0 z-30 overflow-hidden transition-all duration-150 flex items-center justify-center bg-white/95 dark:bg-gray-950/95"
+              style={{
+                top: '48px',
+                height: isReaderPulling ? '36px' : readerPullDistance > 0 ? `${Math.round(readerPullDistance * 0.5)}px` : '0px',
+              }}
+            >
+              {isReaderPulling
+                ? <Spinner />
+                : readerPullDistance >= READER_PULL_THRESHOLD
+                  ? <span className="text-xs text-blue-400">↑ 離して更新</span>
+                  : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
+              }
+            </div>
             <ArticleReader
               key={selectedId}
               articleId={selectedId}
@@ -549,7 +608,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
               onPrev={hasPrev ? handlePrev : undefined}
               onNext={hasNext ? handleNext : undefined}
               onSelect={handleSelect}
-              onRefresh={handleReaderRefresh}
+              scrollRef={readerScrollRef}
             />
           </>
         ) : (

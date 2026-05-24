@@ -35,6 +35,28 @@ make prod
 - `make prod` — frontend をビルド → uvicorn が SSL + SPA 静的ファイル配信
 - ホスト名は `.host` ファイルに記憶 (git 管理外)
 
+## 常時起動 (launchd)
+
+本番環境は launchd で管理されている (`~/Library/LaunchAgents/com.ccxa.snoreader.plist`)。
+
+```bash
+# フロントエンドをビルドして launchd を再起動 (make deploy を使う)
+make deploy
+
+# make deploy 後にサービスが起動しない場合は kickstart で強制再起動
+launchctl kickstart -k "gui/$(id -u)/com.ccxa.snoreader"
+
+# サービス状態確認
+launchctl list | grep snoreader
+
+# ログ確認
+tail -f ~/snoreader/logs/snoreader.err.log
+tail -f ~/snoreader/logs/snoreader.out.log
+```
+
+- `make deploy` の `launchctl unload/load` は再起動が確実でないケースがある
+- その場合は `kickstart -k` で強制再起動すること
+
 ## ディレクトリ構造
 
 - `backend/app/` — FastAPI アプリ (routers/, services/, ai/)
