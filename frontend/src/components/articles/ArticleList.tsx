@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAiStatus, useArticles, useExtractAction, useExtractFailed, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
+import { useRefreshFeed } from '../../hooks/useFeeds';
 import type { Article, ArticleFilters } from '../../types';
 import { getArticle } from '../../api/client';
 import { ArticleCard } from './ArticleCard';
@@ -88,6 +89,8 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       refetchArticles().finally(() => setIsPulling(false));
     }
   };
+
+  const refreshFeed = useRefreshFeed();
 
   const extractFailed = useExtractFailed();
   const extractAct = useExtractAction();
@@ -205,6 +208,20 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   const handlePrev = useCallback(() => goPrev(currentIndex), [goPrev, currentIndex]);
   const handleNext = useCallback(() => goNext(currentIndex), [goNext, currentIndex]);
   const handleSelect = useCallback((id: number) => setSelectedId(id), []);
+
+  const selectedArticleFeedId = selectedId != null
+    ? displayArticles.find(a => a.id === selectedId)?.feed_id
+    : undefined;
+
+  // モバイル記事リーダーのプルリフレッシュ: フィード更新後にリスト表示へ戻る
+  const handleReaderRefresh = useCallback(async () => {
+    if (selectedArticleFeedId != null) {
+      await refreshFeed.mutateAsync(selectedArticleFeedId);
+    } else {
+      await refetchArticles();
+    }
+    setSelectedId(null);
+  }, [selectedArticleFeedId, refreshFeed, refetchArticles]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -532,6 +549,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
               onPrev={hasPrev ? handlePrev : undefined}
               onNext={hasNext ? handleNext : undefined}
               onSelect={handleSelect}
+              onRefresh={handleReaderRefresh}
             />
           </>
         ) : (
