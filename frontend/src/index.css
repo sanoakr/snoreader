@@ -2,9 +2,19 @@
 @plugin "@tailwindcss/typography";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* iOS Safari の overscroll バウンス領域がテーマ色になるよう html/body に背景を敷く */
+html {
+  background: #ffffff;
+}
+html.dark {
+  background: rgb(3 7 18); /* gray-950 */
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
+  background: inherit;
 }
 
 /* 記事コンテンツ内の画像 */

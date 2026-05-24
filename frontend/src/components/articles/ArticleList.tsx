@@ -214,27 +214,12 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     : undefined;
 
   // モバイル記事リーダーのプルリフレッシュ
+  // スクロールコンテナ自身にネイティブ touch リスナーを張る方式が iOS Safari で最も確実。
   const readerScrollRef = useRef<HTMLDivElement | null>(null);
   const READER_PULL_THRESHOLD = 60;
-  const readerPullStartYRef = useRef<number | null>(null);
-  const readerPullStartXRef = useRef(0);
   const [isReaderPulling, setIsReaderPulling] = useState(false);
   const [readerPullDistance, setReaderPullDistance] = useState(0);
-
-  const handleReaderTouchStart = useCallback((e: React.TouchEvent) => {
-    if ((readerScrollRef.current?.scrollTop ?? 0) <= 1) {
-      readerPullStartYRef.current = e.touches[0].clientY;
-      readerPullStartXRef.current = e.touches[0].clientX;
-    }
-  }, []);
-
-  const handleReaderTouchMove = useCallback((e: React.TouchEvent) => {
-    if (readerPullStartYRef.current === null || isReaderPulling) return;
-    const dy = e.touches[0].clientY - readerPullStartYRef.current;
-    const dx = e.touches[0].clientX - readerPullStartXRef.current;
-    if (Math.abs(dx) > Math.abs(dy)) { setReaderPullDistance(0); return; }
-    setReaderPullDistance(dy > 0 ? Math.min(dy, READER_PULL_THRESHOLD * 1.5) : 0);
-  }, [isReaderPulling]);
+  const isReaderPullingRef = useRef(false);
 
   const handleReaderRefresh = useCallback(async () => {
     try {
@@ -249,18 +234,75 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     setSelectedId(null);
   }, [selectedArticleFeedId, refreshFeed, refetchArticles]);
 
-  const handleReaderTouchEnd = useCallback((e: React.TouchEvent) => {
-    const dy = readerPullStartYRef.current !== null
-      ? e.changedTouches[0].clientY - readerPullStartYRef.current
-      : 0;
-    const dx = e.changedTouches[0].clientX - readerPullStartXRef.current;
-    readerPullStartYRef.current = null;
-    setReaderPullDistance(0);
-    if (dy >= READER_PULL_THRESHOLD && Math.abs(dy) >= Math.abs(dx)) {
-      setIsReaderPulling(true);
-      handleReaderRefresh().finally(() => setIsReaderPulling(false));
+  // selectedId 変化のたびに DOM を探してネイティブリスナーを付ける。
+  // ArticleReader 側の onTouchStart/End と共存できるよう passive かつ非排他で動かす。
+  useEffect(() => {
+    if (!selectedId) return;
+    // 子の ref が確定するまで一瞬待つ
+    let startY: number | null = null;
+    let startX = 0;
+    let el: HTMLElement | null = null;
+
+    const onStart = (e: TouchEvent) => {
+      if (!el || el.scrollTop > 1) { startY = null; return; }
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (startY === null || isReaderPullingRef.current) return;
+      const dy = e.touches[0].clientY - startY;
+      const dx = e.touches[0].clientX - startX;
+      if (Math.abs(dx) > Math.abs(dy)) { setReaderPullDistance(0); return; }
+      setReaderPullDistance(dy > 0 ? Math.min(dy, READER_PULL_THRESHOLD * 1.5) : 0);
+    };
+    const onEnd = (e: TouchEvent) => {
+      const dy = startY !== null ? e.changedTouches[0].clientY - startY : 0;
+      const dx = startY !== null ? e.changedTouches[0].clientX - startX : 0;
+      startY = null;
+      setReaderPullDistance(0);
+      if (dy >= READER_PULL_THRESHOLD && Math.abs(dy) >= Math.abs(dx) && !isReaderPullingRef.current) {
+        isReaderPullingRef.current = true;
+        setIsReaderPulling(true);
+        handleReaderRefresh().finally(() => {
+          isReaderPullingRef.current = false;
+          setIsReaderPulling(false);
+        });
+      }
+    };
+
+    // ArticleReader が DOM に乗ってからリスナーを張る
+    const attach = () => {
+      el = readerScrollRef.current
+        ?? (document.querySelector('[data-reader-scroll]') as HTMLElement | null);
+      if (!el) return false;
+      el.addEventListener('touchstart', onStart, { passive: true });
+      el.addEventListener('touchmove', onMove, { passive: true });
+      el.addEventListener('touchend', onEnd, { passive: true });
+      el.addEventListener('touchcancel', onEnd, { passive: true });
+      return true;
+    };
+    if (!attach()) {
+      // 次フレームで再試行
+      const raf = requestAnimationFrame(() => { attach(); });
+      return () => {
+        cancelAnimationFrame(raf);
+        if (el) {
+          el.removeEventListener('touchstart', onStart);
+          el.removeEventListener('touchmove', onMove);
+          el.removeEventListener('touchend', onEnd);
+          el.removeEventListener('touchcancel', onEnd);
+        }
+      };
     }
-  }, [handleReaderRefresh]);
+    return () => {
+      if (el) {
+        el.removeEventListener('touchstart', onStart);
+        el.removeEventListener('touchmove', onMove);
+        el.removeEventListener('touchend', onEnd);
+        el.removeEventListener('touchcancel', onEnd);
+      }
+    };
+  }, [selectedId, handleReaderRefresh]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -473,7 +515,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
 
         {/* Pull-to-refresh indicator — pinned above the scrollable list */}
         <div
-          className="overflow-hidden transition-all duration-150 flex items-center justify-center"
+          className="overflow-hidden transition-all duration-150 flex items-center justify-center bg-white dark:bg-gray-950"
           style={{ height: isPulling ? '36px' : pullDistance > 0 ? `${Math.round(pullDistance * 0.5)}px` : '0px' }}
         >
           {isPulling
@@ -549,12 +591,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       </div>
 
       {/* Reader panel */}
-      <div
-        className={`flex-1 min-w-0 ${selectedId ? 'fixed inset-0 z-20 bg-white dark:bg-gray-950 md:relative md:z-auto' : 'hidden md:block'}`}
-        onTouchStart={selectedId ? handleReaderTouchStart : undefined}
-        onTouchMove={selectedId ? handleReaderTouchMove : undefined}
-        onTouchEnd={selectedId ? handleReaderTouchEnd : undefined}
-      >
+      <div className={`flex-1 min-w-0 ${selectedId ? 'fixed inset-0 z-20 bg-white dark:bg-gray-950 md:relative md:z-auto' : 'hidden md:block'}`}>
         {selectedId ? (
           <>
             <div className="md:hidden fixed top-0 left-0 right-0 z-30 h-12 flex items-center gap-1 px-2 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-700">
@@ -585,9 +622,9 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                 </>
               )}
             </div>
-            {/* Pull-to-refresh indicator (モバイルのみ、ヘッダー直下に固定表示) */}
+            {/* Pull-to-refresh indicator */}
             <div
-              className="md:hidden fixed left-0 right-0 z-30 overflow-hidden transition-all duration-150 flex items-center justify-center bg-white/95 dark:bg-gray-950/95"
+              className="fixed left-0 right-0 z-30 overflow-hidden transition-all duration-150 flex items-center justify-center bg-white/95 dark:bg-gray-950/95"
               style={{
                 top: '48px',
                 height: isReaderPulling ? '36px' : readerPullDistance > 0 ? `${Math.round(readerPullDistance * 0.5)}px` : '0px',
