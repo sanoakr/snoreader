@@ -151,7 +151,7 @@ function AppInner() {
 
       {/* Main content */}
       <div className="flex-1 min-w-0 pt-12 md:pt-0">
-        <ArticleList filters={filters} onFilterChange={setFilters} tagLang={tagLang} onTotalChange={setViewTotal} />
+        <ArticleList filters={filters} onFilterChange={handleFilterChange} tagLang={tagLang} onTotalChange={setViewTotal} />
       </div>
     </div>
   );
