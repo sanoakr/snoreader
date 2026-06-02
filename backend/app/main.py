@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app.database import engine
 from app.models import Base
 from app.ai import task_queue
-from app.routers import articles, feeds, imports, opml, tags
+from app.routers import articles, exports, feeds, imports, opml, tags
 from app.services.background_processor import start as start_bg_processor
 from app.services.background_processor import stop as stop_bg_processor
 from app.services.scheduler import start_scheduler, stop_scheduler
@@ -111,6 +111,7 @@ app.include_router(articles.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
 app.include_router(opml.router, prefix="/api")
 app.include_router(imports.router, prefix="/api")
+app.include_router(exports.router, prefix="/api")
 
 # Serve frontend build in production (when frontend/dist exists)
 _frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

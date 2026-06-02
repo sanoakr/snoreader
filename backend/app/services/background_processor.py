@@ -109,14 +109,24 @@ async def _process_one() -> bool:
             return stmt.where(Article.id.not_in(skip_ids)) if skip_ids else stmt
 
         # Phase 1: articles needing summary + tags.
-        # 候補は「本文が取得済み or これ以上抽出は試みない」記事のみ。
-        # extract_status が "error" の記事は一時的障害なので Phase 0 で再試行されるまで除外。
+        # 候補:
+        #   a) 本文取得済み (content IS NOT NULL)
+        #   b) 恒久抽出失敗 (not_found / forbidden / skipped / empty)
+        #   c) 未抽出 (extract_status IS NULL) だが RSS summary がある
+        #      → Phase 0 は summary >= 100 を対象外にするので、RSS summary だけの記事は
+        #        ここで処理しないと永遠にスタックする。
+        # extract_status = "error" は一時的障害なので Phase 0 再試行まで除外。
         stmt = _skip(
             select(Article)
             .where(
                 Article.ai_summary.is_(None),
                 (Article.content.isnot(None))
-                | (Article.extract_status.in_(["not_found", "forbidden", "skipped", "empty"])),
+                | (Article.extract_status.in_(["not_found", "forbidden", "skipped", "empty"]))
+                | (
+                    Article.extract_status.is_(None)
+                    & Article.content.is_(None)
+                    & Article.summary.isnot(None)
+                ),
             )
             .order_by(Article.is_saved.desc(), Article.is_read.asc(), Article.published_at.desc())
             .limit(1)

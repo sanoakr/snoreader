@@ -193,7 +193,7 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
           },
         },
       );
-      setSuggestedTags([]);
+      setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));
     } else {
       addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
       setSuggestedTags(prev => prev.filter(t => t.name !== suggestion.name));

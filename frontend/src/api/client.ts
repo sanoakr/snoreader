@@ -216,6 +216,7 @@ export function importOpml(file: File): Promise<{ created: number; skipped: numb
 }
 
 export const opmlExportUrl = `${BASE}/opml/export`;
+export const savedArticlesExportUrl = `${BASE}/export/saved-articles`;
 
 // --- Import ---
 

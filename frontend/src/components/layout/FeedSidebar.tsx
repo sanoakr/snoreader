@@ -3,7 +3,7 @@ import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
 import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
-import { opmlExportUrl } from '../../api/client';
+import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
 
 interface Props {
@@ -348,13 +348,22 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 Export OPML
               </a>
             </div>
-            <button
-              onClick={() => articlesFileRef.current?.click()}
-              disabled={importArticles.isPending}
-              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
-            >
-              {importArticles.isPending ? 'Importing...' : 'Import Saved Articles (JSON)'}
-            </button>
+            <div className="flex gap-1">
+              <button
+                onClick={() => articlesFileRef.current?.click()}
+                disabled={importArticles.isPending}
+                className="flex-1 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
+              >
+                {importArticles.isPending ? 'Importing...' : 'Import Saved (JSON)'}
+              </button>
+              <a
+                href={savedArticlesExportUrl}
+                download
+                className="flex-1 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded text-center"
+              >
+                Export Saved (JSON)
+              </a>
+            </div>
             {importOpml.isSuccess && (
               <p className="text-xs text-green-600">
                 Imported {importOpml.data.created} feeds ({importOpml.data.skipped} skipped)
