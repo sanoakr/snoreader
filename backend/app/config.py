@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     port: int = 8000
 
     llm_base_url: str = "http://localhost:8880/v1"
-    llm_model: str = "prism-ml/Ternary-Bonsai-8B-mlx-2bit"
+    llm_model: str = "/Users/sano/models/gemma-4-e4b-it-4bit"
     llm_timeout: int = 120
 
     model_config = {"env_prefix": "SNOREADER_"}

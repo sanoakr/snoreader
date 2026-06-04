@@ -84,7 +84,7 @@ async def translate_to_english(ja_name: str, priority: int | None = None) -> str
         },
         {"role": "user", "content": ja_name},
     ]
-    result = await chat_completion(messages, max_tokens=20, temperature=0.1, priority=priority)
+    result = await chat_completion(messages, max_tokens=1024, temperature=0.1, priority=priority)
     if not result:
         return None
     # Extract the first ASCII token — models sometimes echo the Japanese alongside the translation
@@ -111,7 +111,7 @@ async def translate_tags(names: list[str], priority: int | None = None) -> dict[
         {"role": "system", "content": _TRANSLATE_SYSTEM},
         {"role": "user", "content": "\n".join(remaining)},
     ]
-    max_tokens = min(len(remaining) * 20, 400)
+    max_tokens = min(len(remaining) * 20 + 1024, 1792)
     result = await chat_completion(messages, max_tokens=max_tokens, temperature=0.1, priority=priority)
     if result:
         for line in result.splitlines():
@@ -148,7 +148,7 @@ async def suggest_tags(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": "\n".join(user_parts)},
     ]
-    result = await chat_completion(messages, max_tokens=60, temperature=0.1, priority=priority)
+    result = await chat_completion(messages, max_tokens=1024, temperature=0.1, priority=priority)
     if not result:
         return []
     return _parse_tag_pairs(result)

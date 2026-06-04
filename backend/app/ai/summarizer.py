@@ -47,7 +47,7 @@ async def summarize_article(title: str, text: str, priority: int | None = None) 
             ),
         },
     ]
-    raw = await chat_completion(messages, max_tokens=256, temperature=0.2, priority=priority)
+    raw = await chat_completion(messages, max_tokens=1536, temperature=0.2, priority=priority)
     if not raw:
         return None
     return _clean_summary(raw)

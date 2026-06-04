@@ -739,7 +739,7 @@ async def chat_about_article(
     messages.append({"role": "user", "content": body.message})
 
     reply = await chat_completion(
-        messages, max_tokens=512, temperature=0.3, priority=PRIORITY_FOREGROUND
+        messages, max_tokens=2048, temperature=0.3, priority=PRIORITY_FOREGROUND
     )
     if reply is None:
         raise HTTPException(status_code=503, detail="LLM server unavailable")

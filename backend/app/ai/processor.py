@@ -99,7 +99,7 @@ async def summarize_and_tag(
             ),
         },
     ]
-    result = await chat_completion(messages, max_tokens=400, temperature=0.2, priority=priority)
+    result = await chat_completion(messages, max_tokens=1792, temperature=0.2, priority=priority)
     if not result:
         return None, []
     return _parse_output(result)
