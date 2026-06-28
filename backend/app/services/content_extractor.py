@@ -66,6 +66,14 @@ _BRACKET_BLOCK_RE = re.compile(r'\\\[([\s\S]+?)\\\]')
 _BRACKET_INLINE_RE = re.compile(r'\\\(([\s\S]+?)\\\)')
 _PRE_OR_CODE_RE = re.compile(r'<(pre|code)\b[^>]*>[\s\S]*?</\1>', re.IGNORECASE)
 _BR_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
+# <b>/<strong> が <a> 1 件だけを包んでいるパターン。Gigazine 等が
+# 文中リンクを太字で強調するときに使うが、trafilatura はこの形を
+# 段落から切り出してリンクを次の段落より後ろにずらしてしまうため、
+# 抽出前に外側の強調タグだけ剥がす。
+_BOLD_WRAPPING_ANCHOR_RE = re.compile(
+    r'<(b|strong)\b[^>]*>(\s*<a\b[^>]*>[\s\S]*?</a>\s*)</\1>',
+    re.IGNORECASE,
+)
 # 段落の境目: ブロック要素タグの開き・閉じ、または <br>
 _BLOCK_BOUNDARY_RE = re.compile(
     r'<(?:/?(?:p|div|li|h[1-6]|blockquote|td|th|figcaption|article|section)\b[^>]*'
@@ -476,6 +484,10 @@ def _extract_from_html(html: str | bytes, url: str) -> str | None:
 
     # 数式タグを一時保護してから trafilatura に渡す
     html_str = html if isinstance(html, str) else html.decode(errors="replace")
+    # <b><a>...</a></b> のように強調タグが <a> だけを包んでいると
+    # trafilatura が段落から切り出してしまい、リンクが本来の位置より
+    # 後ろの段落の下に表示される。外側の強調だけ事前に剥がす。
+    html_str = _BOLD_WRAPPING_ANCHOR_RE.sub(r'\2', html_str)
     html_str, math_map = _protect_math(html_str)
 
     tree = trafilatura.load_html(html_str)
