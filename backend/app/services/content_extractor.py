@@ -58,6 +58,12 @@ _BLOCK_DOLLAR_RE = re.compile(r'\$\$([\s\S]+?)\$\$')
 _INLINE_DOLLAR_RE = re.compile(
     r'(?<![\\A-Za-z0-9_$])\$(?!\s)([^$\n<>]{1,200}?)(?<!\s)\$(?![A-Za-z0-9_$])'
 )
+# LaTeX 標準のデリミタ \(...\) / \[...\] (KaTeX 系サイトが採用)。
+# - \[...\] は display、\(...\) は inline
+# - 注: \[\] は <code class="math-tex"> プレースホルダーに先に置換するため、
+#   その内側の \(...\) が二重変換されることはない
+_BRACKET_BLOCK_RE = re.compile(r'\\\[([\s\S]+?)\\\]')
+_BRACKET_INLINE_RE = re.compile(r'\\\(([\s\S]+?)\\\)')
 _PRE_OR_CODE_RE = re.compile(r'<(pre|code)\b[^>]*>[\s\S]*?</\1>', re.IGNORECASE)
 _BR_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
 # 段落の境目: ブロック要素タグの開き・閉じ、または <br>
@@ -166,82 +172,106 @@ def _fix_html(html: str, base_url: str = "") -> str:
 
     html = re.sub(r'<img\b[^>]*>', _fix_img_tag, html)
 
-    # Qiita 等が本文に埋める生のドル記法を <code class="math-tex"> へ変換する
-    html = _convert_dollar_math(html)
+    # Qiita / note / KaTeX サイトが本文に埋める生の数式記法を
+    # <code class="math-tex"> プレースホルダーへ変換する
+    html = _convert_math(html)
     return html
 
 
-def _convert_dollar_math(html: str) -> str:
-    """抽出後 HTML 内の $$...$$ / $...$ を <code class="math-tex"> に変換する。
+def _convert_math(html: str) -> str:
+    """抽出後 HTML 内の数式記法 ($$, $, \\[\\], \\(\\)) を <code class="math-tex"> へ変換する。
 
-    <pre>/<code> 内のドル記号は対象外にするため、いったん退避してから戻す。
+    <pre>/<code> 内は対象外にするため事前に退避する。処理順は外側のブロックから:
+    1) \\[...\\]  → display
+    2) \\(...\\)  → inline
+    3) $$...$$    → display または inline (前後文脈で判定)
+    4) $...$      → inline
+    変換済みの <code class="math-tex"></code> は他段階の正規表現に巻き込まれない
+    ようプレースホルダーに退避してから戻す。
     """
     import html as html_mod
 
     # pre/code ブロックを退避
-    placeholders: list[str] = []
+    code_blocks: list[str] = []
 
-    def _stash(m: re.Match) -> str:
-        placeholders.append(m.group(0))
-        return f'\x00CODE{len(placeholders) - 1}\x00'
+    def _stash_code(m: re.Match) -> str:
+        code_blocks.append(m.group(0))
+        return f'\x00CODE{len(code_blocks) - 1}\x00'
 
-    stashed = _PRE_OR_CODE_RE.sub(_stash, html)
+    stashed = _PRE_OR_CODE_RE.sub(_stash_code, html)
 
     def _has_visible_text(segment: str) -> bool:
         """HTML タグを除去した残りに空白以外の文字があるか。"""
         return bool(_TAG_STRIP_RE.sub('', segment).strip())
 
     def _is_block_context(src: str, start: int, end: int) -> bool:
-        """`$$...$$` の前後が段落の境界だけならブロック扱い。"""
-        # 前方: 直近のブロック境界を探す
+        """前後がブロック境界だけならブロック扱い。"""
         prev_boundary_end = 0
         for bm in _BLOCK_BOUNDARY_RE.finditer(src, 0, start):
             prev_boundary_end = bm.end()
         if _has_visible_text(src[prev_boundary_end:start]):
             return False
-        # 後方: 次のブロック境界まで
         next_boundary = _BLOCK_BOUNDARY_RE.search(src, end)
         next_boundary_start = next_boundary.start() if next_boundary else len(src)
         if _has_visible_text(src[end:next_boundary_start]):
             return False
         return True
 
-    def _build_replacement(inner: str, display: bool) -> str:
+    # 変換結果(math-tex)を退避するための領域。後段の正規表現で巻き込まれないよう
+    # 一旦プレースホルダーに置き換え、最後にまとめて戻す。
+    math_blocks: list[str] = []
+
+    def _emit(inner: str, display: bool) -> str:
         latex = _BR_RE.sub(' ', inner).strip()
         latex = _TAG_STRIP_RE.sub(' ', latex).strip()
         latex = html_mod.unescape(latex)
         if not latex:
             return ''
         mode = 'display' if display else 'inline'
-        return f'<code class="math-tex" data-display="{mode}" data-latex="{html_mod.escape(latex)}"></code>'
+        tag = f'<code class="math-tex" data-display="{mode}" data-latex="{html_mod.escape(latex)}"></code>'
+        math_blocks.append(tag)
+        return f'\x00MATH{len(math_blocks) - 1}\x00'
 
-    # ブロックは置換前の元 HTML 上で位置を見て文脈判定するため finditer + 結合を使う
-    out: list[str] = []
-    pos = 0
-    for m in _BLOCK_DOLLAR_RE.finditer(stashed):
-        repl = _build_replacement(
-            m.group(1),
-            display=_is_block_context(stashed, m.start(), m.end()),
-        )
-        if not repl:
-            continue
-        out.append(stashed[pos:m.start()])
-        out.append(repl)
-        pos = m.end()
-    out.append(stashed[pos:])
-    stashed = ''.join(out)
+    def _replace_simple(pattern: re.Pattern, src: str, display: bool) -> str:
+        def _sub(m: re.Match) -> str:
+            return _emit(m.group(1), display) or m.group(0)
+        return pattern.sub(_sub, src)
 
-    def _inline(m: re.Match) -> str:
-        return _build_replacement(m.group(1), display=False) or m.group(0)
+    def _replace_with_context(pattern: re.Pattern, src: str) -> str:
+        """前後の文脈で display / inline を判定する置換 ($$...$$ 用)。"""
+        out: list[str] = []
+        pos = 0
+        for m in pattern.finditer(src):
+            display = _is_block_context(src, m.start(), m.end())
+            repl = _emit(m.group(1), display)
+            if not repl:
+                continue
+            out.append(src[pos:m.start()])
+            out.append(repl)
+            pos = m.end()
+        out.append(src[pos:])
+        return ''.join(out)
 
-    stashed = _INLINE_DOLLAR_RE.sub(_inline, stashed)
+    # 1) \[...\] (KaTeX/MathJax 標準のブロック数式)
+    stashed = _replace_simple(_BRACKET_BLOCK_RE, stashed, display=True)
+    # 2) \(...\) (KaTeX/MathJax 標準のインライン数式)
+    stashed = _replace_simple(_BRACKET_INLINE_RE, stashed, display=False)
+    # 3) $$...$$ (note.com は文中混在もあるので文脈判定)
+    stashed = _replace_with_context(_BLOCK_DOLLAR_RE, stashed)
+    # 4) $...$ (常にインライン)
+    stashed = _replace_simple(_INLINE_DOLLAR_RE, stashed, display=False)
 
-    # 退避していた pre/code を戻す
-    def _restore(m: re.Match) -> str:
-        idx = int(m.group(1))
-        return placeholders[idx]
+    # pre/code を戻す
+    def _restore_code(m: re.Match) -> str:
+        return code_blocks[int(m.group(1))]
 
-    return re.sub(r'\x00CODE(\d+)\x00', _restore, stashed)
+    stashed = re.sub(r'\x00CODE(\d+)\x00', _restore_code, stashed)
+
+    # math-tex を戻す
+    def _restore_math(m: re.Match) -> str:
+        return math_blocks[int(m.group(1))]
+
+    return re.sub(r'\x00MATH(\d+)\x00', _restore_math, stashed)
 
 
 def _find_yahoo_next_url(html_bytes: bytes) -> str | None:
