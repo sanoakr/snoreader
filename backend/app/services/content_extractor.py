@@ -47,8 +47,9 @@ _ANNOTATION_RE = re.compile(
     r'<annotation\b[^>]*encoding="application/x-tex"[^>]*>([\s\S]*?)</annotation>',
     re.IGNORECASE,
 )
-# Qiita 等が記事本文に埋める生のドル記法を捕まえるパターン。
-# - $$...$$ はブロック、$...$ はインライン
+# Qiita / note 等が記事本文に埋める生のドル記法を捕まえるパターン。
+# - $$...$$ : 段落単独なら display、文中混在なら inline (note.com は本文中でも $$ を使う)
+# - $...$  : 常に inline
 # - <pre>/<code> 内は対象外にするため事前に剥がす
 _BLOCK_DOLLAR_RE = re.compile(r'\$\$([\s\S]+?)\$\$')
 # $ の前後が ASCII 英数字/もう一つの $ でないことを要求する。
@@ -59,6 +60,12 @@ _INLINE_DOLLAR_RE = re.compile(
 )
 _PRE_OR_CODE_RE = re.compile(r'<(pre|code)\b[^>]*>[\s\S]*?</\1>', re.IGNORECASE)
 _BR_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
+# 段落の境目: ブロック要素タグの開き・閉じ、または <br>
+_BLOCK_BOUNDARY_RE = re.compile(
+    r'<(?:/?(?:p|div|li|h[1-6]|blockquote|td|th|figcaption|article|section)\b[^>]*'
+    r'|br\s*/?)>',
+    re.IGNORECASE,
+)
 
 # 著者・コメンテーターのプロフィール画像として知られている CDN ホスト
 _PROFILE_IMG_HOSTS = {
@@ -175,28 +182,53 @@ def _convert_dollar_math(html: str) -> str:
 
     stashed = _PRE_OR_CODE_RE.sub(_stash, html)
 
-    def _block(m: re.Match) -> str:
-        inner = m.group(1)
-        # <br/> を空白に正規化して LaTeX 内の改行扱いにする
+    def _has_visible_text(segment: str) -> bool:
+        """HTML タグを除去した残りに空白以外の文字があるか。"""
+        return bool(_TAG_STRIP_RE.sub('', segment).strip())
+
+    def _is_block_context(src: str, start: int, end: int) -> bool:
+        """`$$...$$` の前後が段落の境界だけならブロック扱い。"""
+        # 前方: 直近のブロック境界を探す
+        prev_boundary_end = 0
+        for bm in _BLOCK_BOUNDARY_RE.finditer(src, 0, start):
+            prev_boundary_end = bm.end()
+        if _has_visible_text(src[prev_boundary_end:start]):
+            return False
+        # 後方: 次のブロック境界まで
+        next_boundary = _BLOCK_BOUNDARY_RE.search(src, end)
+        next_boundary_start = next_boundary.start() if next_boundary else len(src)
+        if _has_visible_text(src[end:next_boundary_start]):
+            return False
+        return True
+
+    def _build_replacement(inner: str, display: bool) -> str:
         latex = _BR_RE.sub(' ', inner).strip()
-        # 残った HTML タグは除去 (Qiita では <br> 以外まず入らない)
         latex = _TAG_STRIP_RE.sub(' ', latex).strip()
         latex = html_mod.unescape(latex)
         if not latex:
-            return m.group(0)
-        return f'<code class="math-tex" data-display="display" data-latex="{html_mod.escape(latex)}"></code>'
+            return ''
+        mode = 'display' if display else 'inline'
+        return f'<code class="math-tex" data-display="{mode}" data-latex="{html_mod.escape(latex)}"></code>'
+
+    # ブロックは置換前の元 HTML 上で位置を見て文脈判定するため finditer + 結合を使う
+    out: list[str] = []
+    pos = 0
+    for m in _BLOCK_DOLLAR_RE.finditer(stashed):
+        repl = _build_replacement(
+            m.group(1),
+            display=_is_block_context(stashed, m.start(), m.end()),
+        )
+        if not repl:
+            continue
+        out.append(stashed[pos:m.start()])
+        out.append(repl)
+        pos = m.end()
+    out.append(stashed[pos:])
+    stashed = ''.join(out)
 
     def _inline(m: re.Match) -> str:
-        latex = m.group(1)
-        # 1 行で完結するインラインに <br> や複数行が混ざる可能性は低いが念のため正規化
-        latex = _BR_RE.sub(' ', latex).strip()
-        latex = _TAG_STRIP_RE.sub(' ', latex).strip()
-        latex = html_mod.unescape(latex)
-        if not latex:
-            return m.group(0)
-        return f'<code class="math-tex" data-display="inline" data-latex="{html_mod.escape(latex)}"></code>'
+        return _build_replacement(m.group(1), display=False) or m.group(0)
 
-    stashed = _BLOCK_DOLLAR_RE.sub(_block, stashed)
     stashed = _INLINE_DOLLAR_RE.sub(_inline, stashed)
 
     # 退避していた pre/code を戻す
