@@ -1,26 +1,51 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
+import DOMPurify from 'dompurify';
+import { useQuery } from '@tanstack/react-query';
 
 const PROFILE_IMG_HOSTS = ['byline-pctr.c.yimg.jp'];
 
+// DOMPurify の設定: 記事コンテンツに必要なタグ・属性を許可しつつスクリプトを排除
+// code.math-tex[data-latex] はバックエンドが数式保護のために挿入するタグ
+const PURIFY_CONFIG: Parameters<typeof DOMPurify.sanitize>[1] = {
+  ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mspace', 'mtext', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+  ADD_ATTR: ['data-latex', 'data-display', 'colspan', 'rowspan', 'referrerpolicy', 'loading', 'style', 'target', 'rel'],
+  FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'button'],
+  FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
+};
+
 function sanitizeContent(html: string): string {
-  return html.replace(/<img\b[^>]*>/gi, tag => {
+  // <a> は void element ではないため <a href="..."/> は開いたままになる。
+  // Qiita 等のセクションアンカーで頻出するため明示的に閉じる。
+  html = html.replace(/<a(\b[^>]*)\/>/gi, '<a$1></a>');
+
+  // Gigazine 等: <p>・</p><a href="...">text</a> を <p>・<a>text</a></p> に統合する。
+  // 弾丸文字だけの <p> の直後に裸の <a> が続くと別行に分離して描画されるため。
+  html = html.replace(
+    /<p>\s*(?:<strong>)?([・•●◆▶])\s*(?:<\/strong>)?\s*<\/p>\s*(<a\b[^>]*>[\s\S]*?<\/a>)/g,
+    '<p>$1$2</p>',
+  );
+
+  // <img> タグ: プロフィール画像除去・min-height・loading="lazy" 付与
+  html = html.replace(/<img\b[^>]*>/gi, tag => {
     const m = tag.match(/src="([^"]*)"/i);
     if (!m) return tag;
     try {
       if (PROFILE_IMG_HOSTS.includes(new URL(m[1]).hostname)) return '';
     } catch { /* ignore */ }
-    // min-height で読み込み前の高さ 0 を回避し、CLS を軽減
     if (!tag.includes('style=')) {
       tag = tag.replace('<img', '<img style="min-height:40px;"');
     }
-    // loading="lazy" がなければ追加
     if (!tag.includes('loading=')) {
       tag = tag.replace('<img', '<img loading="lazy"');
     }
     return tag;
   });
+
+  // DOMPurify でスクリプト・危険なイベント属性を除去
+  return DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string;
 }
-import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '../../api/client';
 import { useUpdateArticle, useSummarizeArticle, useSuggestTags, useExtractContent, useRelatedArticles } from '../../hooks/useArticles';
 import { Spinner } from '../common/Spinner';
@@ -468,6 +493,25 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
               el.querySelectorAll('a').forEach(a => {
                 a.target = '_blank';
                 a.rel = 'noopener noreferrer';
+              });
+              // バックエンドが保護した数式タグを KaTeX でレンダリングする
+              el.querySelectorAll<HTMLElement>('code.math-tex[data-latex]').forEach(code => {
+                const latex = code.dataset.latex ?? '';
+                const displayMode = code.dataset.display === 'display';
+                try {
+                  const rendered = katex.renderToString(latex, {
+                    throwOnError: false,
+                    displayMode,
+                    output: 'html',
+                  });
+                  const wrapper = document.createElement(displayMode ? 'div' : 'span');
+                  wrapper.className = displayMode ? 'math-block' : 'math-inline';
+                  wrapper.innerHTML = rendered;
+                  code.replaceWith(wrapper);
+                } catch {
+                  // 解析失敗時はそのまま raw LaTeX を表示
+                  code.textContent = latex;
+                }
               });
             }}
             dangerouslySetInnerHTML={{ __html: sanitizedContent }}

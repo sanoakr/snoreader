@@ -19,6 +19,35 @@ _ATTR_SRC = re.compile(r'\bsrc="([^"]*)"')
 _ATTR_ALT = re.compile(r'\balt="([^"]*)"')
 _NESTED_PRE = re.compile(r'<pre>\s*<pre>(.*?)</pre>\s*</pre>', re.DOTALL)
 
+# trafilatura が出力する <row>/<cell> を標準 HTML テーブルタグへ変換するパターン
+_ROW_RE = re.compile(r'<row\b([^>]*)>', re.IGNORECASE)
+_CELL_RE = re.compile(r'<cell\b([^>]*)>', re.IGNORECASE)
+
+# Zenn / 数式サイトが使う数式要素を抽出・保護するためのパターン
+# display=true → ブロック数式、それ以外 → インライン数式
+_EMBED_KATEX_RE = re.compile(
+    r'<embed-katex([^>]*)>\s*<eq[^>]*>([\s\S]*?)</eq>\s*</embed-katex>',
+    re.IGNORECASE,
+)
+# Qiita/はてな等の Markdown レンダラが生成する数式 span の開きタグ
+# - math-inline / math-block: Qiita 等
+# - katex-display: KaTeX レンダラ
+# - mathjax / MathJax_Display: MathJax
+# (入れ子になる <span> のため、閉じタグは別途カウンタで探す)
+_MATH_SPAN_OPEN_RE = re.compile(
+    r'<span\b([^>]*\bclass="[^"]*\b'
+    r'(?:math-inline|math-block|katex-display|MathJax(?:_Display)?|mathjax)'
+    r'\b[^"]*"[^>]*)>',
+    re.IGNORECASE,
+)
+_SPAN_TOKEN_RE = re.compile(r'<(/?)span\b[^>]*>', re.IGNORECASE)
+_TAG_STRIP_RE = re.compile(r'<[^>]+>')
+_MATH_DOLLAR_RE = re.compile(r'^\s*(\$\$?)([\s\S]+?)\1\s*$')
+_ANNOTATION_RE = re.compile(
+    r'<annotation\b[^>]*encoding="application/x-tex"[^>]*>([\s\S]*?)</annotation>',
+    re.IGNORECASE,
+)
+
 # 著者・コメンテーターのプロフィール画像として知られている CDN ホスト
 _PROFILE_IMG_HOSTS = {
     "byline-pctr.c.yimg.jp",  # Yahoo! ニュース エキスパート著者アイコン
@@ -64,6 +93,35 @@ def _fix_html(html: str, base_url: str = "") -> str:
 
     html = _GRAPHIC_RE.sub(_graphic_to_img, html)
     html = _NESTED_PRE.sub(r'<pre>\1</pre>', html)
+
+    # trafilatura が出力する <row>/<cell> を標準 <tr>/<td> に変換する
+    def _row_to_tr(m: re.Match) -> str:
+        attrs = m.group(1)
+        # span 属性は colspan として引き継ぐ
+        colspan = re.search(r'\bspan="(\d+)"', attrs)
+        if colspan:
+            return f'<tr colspan="{colspan.group(1)}">'
+        return '<tr>'
+
+    # <cell role="head"> → <th>...</th>、それ以外 → <td>...</td>
+    # </cell> が常に </td> になる問題を避けるため、開きタグと対になる閉じタグを選択する
+    cell_stack: list[str] = []
+
+    def _cell_to_td(m: re.Match) -> str:
+        attrs = m.group(1)
+        tag = 'th' if re.search(r'\brole="head"', attrs) else 'td'
+        cell_stack.append(tag)
+        return f'<{tag}>'
+
+    def _close_cell(_m: re.Match) -> str:
+        # セルは入れ子にならないため FIFO で先頭から取り出す
+        tag = cell_stack.pop(0) if cell_stack else 'td'
+        return f'</{tag}>'
+
+    html = _ROW_RE.sub(_row_to_tr, html)
+    html = re.sub(r'</row>', '</tr>', html, flags=re.IGNORECASE)
+    html = _CELL_RE.sub(_cell_to_td, html)
+    html = re.sub(r'</cell>', _close_cell, html, flags=re.IGNORECASE)
 
     # Absolutize relative img src, add referrerpolicy, and strip known profile-image hosts
     def _fix_img_tag(m: re.Match) -> str:
@@ -158,6 +216,103 @@ def _extract_matome_posts(html_bytes: bytes, base_url: str) -> str | None:
         return None
 
 
+def _protect_math(html: str) -> tuple[str, dict[str, str]]:
+    """数式要素を一時プレースホルダーに置換してtrafilaturaの削除を防ぐ。
+
+    Zenn の <embed-katex> や Qiita/はてな等の <span class="math-…"> は
+    trafilatura に未知タグとして削除されるため、プレースホルダーへ差し替えて
+    抽出後に復元する。
+    Returns (modified_html, placeholder_map).
+    """
+    import html as html_mod
+    placeholder_map: dict[str, str] = {}
+    counter = [0]
+
+    def _make_placeholder(latex: str, display: bool) -> str:
+        key = f'MATHPLACEHOLDER{counter[0]:04d}END'
+        counter[0] += 1
+        tag = 'display' if display else 'inline'
+        escaped = html_mod.escape(latex)
+        placeholder_map[key] = (
+            f'<code class="math-tex" data-display="{tag}" data-latex="{escaped}"></code>'
+        )
+        # trafilatura がテキストノードとして拾えるよう中身はキーを埋め込む
+        return f'<span>{key}</span>'
+
+    def _embed_katex_replace(m: re.Match) -> str:
+        attrs = m.group(1)
+        latex = m.group(2)
+        display = 'display="true"' in attrs or 'display=true' in attrs
+        return _make_placeholder(latex, display)
+
+    def _replace_math_spans(src: str) -> str:
+        """入れ子になる <span> を考慮して数式 span をプレースホルダーへ置換する。
+
+        外側でマッチした span の内部を再走査しないよう、消費位置を毎回スキップする。
+        """
+        out: list[str] = []
+        pos = 0
+        while True:
+            m = _MATH_SPAN_OPEN_RE.search(src, pos)
+            if not m:
+                break
+            start = m.start()
+            attrs = m.group(1)
+            cls_match = re.search(r'class="([^"]*)"', attrs, re.IGNORECASE)
+            cls = cls_match.group(1).lower() if cls_match else ''
+            display = ('math-block' in cls) or ('katex-display' in cls)
+
+            # 対応する閉じ </span> を入れ子カウンタで探す
+            depth = 1
+            end = -1
+            inner_end = -1
+            for tok in _SPAN_TOKEN_RE.finditer(src, m.end()):
+                if tok.group(1) == '':
+                    depth += 1
+                else:
+                    depth -= 1
+                    if depth == 0:
+                        inner_end = tok.start()
+                        end = tok.end()
+                        break
+            if end == -1:
+                # 閉じが見つからない場合は無視して先へ進める
+                out.append(src[pos:m.end()])
+                pos = m.end()
+                continue
+            inner = src[m.end():inner_end]
+
+            # annotation encoding="application/x-tex" があれば LaTeX 原文を優先
+            annot = _ANNOTATION_RE.search(inner)
+            if annot:
+                latex = html_mod.unescape(annot.group(1)).strip()
+            else:
+                text = _TAG_STRIP_RE.sub('', inner).strip()
+                text = html_mod.unescape(text)
+                dollar = _MATH_DOLLAR_RE.match(text)
+                latex = dollar.group(2).strip() if dollar else text
+            if not latex:
+                out.append(src[pos:end])
+                pos = end
+                continue
+            out.append(src[pos:start])
+            out.append(_make_placeholder(latex, display))
+            pos = end
+        out.append(src[pos:])
+        return ''.join(out)
+
+    html = _EMBED_KATEX_RE.sub(_embed_katex_replace, html)
+    html = _replace_math_spans(html)
+    return html, placeholder_map
+
+
+def _restore_math(html: str, placeholder_map: dict[str, str]) -> str:
+    """_protect_math で置換したプレースホルダーを復元する。"""
+    for key, replacement in placeholder_map.items():
+        html = html.replace(key, replacement)
+    return html
+
+
 def _extract_from_html(html: str | bytes, url: str) -> str | None:
     """Parse HTML (text or bytes) and extract main content as HTML string."""
     html_bytes = html if isinstance(html, bytes) else html.encode()
@@ -168,7 +323,11 @@ def _extract_from_html(html: str | bytes, url: str) -> str | None:
         if result:
             return result
 
-    tree = trafilatura.load_html(html)
+    # 数式タグを一時保護してから trafilatura に渡す
+    html_str = html if isinstance(html, str) else html.decode(errors="replace")
+    html_str, math_map = _protect_math(html_str)
+
+    tree = trafilatura.load_html(html_str)
     if tree is None:
         return None
     result = trafilatura.extract(
@@ -196,6 +355,8 @@ def _extract_from_html(html: str | bytes, url: str) -> str | None:
         )
     if result:
         result = _fix_html(result, base_url=url)
+        if math_map:
+            result = _restore_math(result, math_map)
     return result
 
 
