@@ -81,6 +81,11 @@ _YAHOO_IGNORE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# 47news.jp の記事ページは要約のみ表示し、本文へは news.jp の URL に飛ばす。
+_47NEWS_RE = re.compile(r'https?://(?:www\.)?47news\.jp/\d+\.html')
+# news.jp の記事 URL (ID 部分は数字)
+_NEWS_JP_ARTICLE_RE = re.compile(r'^https?://news\.jp/i/\d+(?:\?[^\s"\']*)?$')
+
 _BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -255,6 +260,27 @@ def _find_yahoo_next_url(html_bytes: bytes) -> str | None:
                 return href
         for href in hrefs:
             if href.startswith('http') and not _YAHOO_IGNORE_RE.search(href):
+                return href
+    except Exception:
+        pass
+    return None
+
+
+def _find_47news_full_url(html_bytes: bytes) -> str | None:
+    """47news.jp の記事ページから「記事全文を読む」リンク先 (news.jp) を取り出す。"""
+    try:
+        from lxml import html as lxml_html
+        tree = lxml_html.fromstring(html_bytes)
+        # アンカーのテキストが "記事全文を読む" を含むものを優先
+        for a in tree.xpath('//a[@href]'):
+            text = ''.join(a.itertext()).strip()
+            href = a.get('href', '')
+            if '記事全文を読む' in text and _NEWS_JP_ARTICLE_RE.match(href):
+                return href
+        # フォールバック: news.jp/i/ に向くアンカーを 1 件
+        for a in tree.xpath('//a[@href]'):
+            href = a.get('href', '')
+            if _NEWS_JP_ARTICLE_RE.match(href):
                 return href
     except Exception:
         pass
@@ -508,6 +534,18 @@ async def extract_content(url: str) -> tuple[str | None, ExtractStatus | None]:
                 next_url = _find_yahoo_next_url(resp.content)
                 if next_url and next_url != str(resp.url):
                     logger.info("Yahoo: following %s → %s", resp.url, next_url)
+                    try:
+                        resp = await client.get(next_url)
+                        resp.raise_for_status()
+                    except Exception as e:
+                        logger.warning("Failed to fetch %s: %s", next_url, e)
+
+            # 47news → news.jp: 47news の記事ページは要約のみで、本文は
+            # 「記事全文を読む」ボタンから news.jp に飛ぶ。1 ホップだけ追う。
+            if _47NEWS_RE.match(str(resp.url)):
+                next_url = _find_47news_full_url(resp.content)
+                if next_url and next_url != str(resp.url):
+                    logger.info("47news: following %s → %s", resp.url, next_url)
                     try:
                         resp = await client.get(next_url)
                         resp.raise_for_status()
