@@ -47,6 +47,18 @@ _ANNOTATION_RE = re.compile(
     r'<annotation\b[^>]*encoding="application/x-tex"[^>]*>([\s\S]*?)</annotation>',
     re.IGNORECASE,
 )
+# Qiita 等が記事本文に埋める生のドル記法を捕まえるパターン。
+# - $$...$$ はブロック、$...$ はインライン
+# - <pre>/<code> 内は対象外にするため事前に剥がす
+_BLOCK_DOLLAR_RE = re.compile(r'\$\$([\s\S]+?)\$\$')
+# $ の前後が ASCII 英数字/もう一つの $ でないことを要求する。
+# Python の \w は Unicode で日本語にもマッチするため [A-Za-z0-9_] で明示する。
+# 値段 "$30" や正規表現末尾の $$ などはここで除外される。
+_INLINE_DOLLAR_RE = re.compile(
+    r'(?<![\\A-Za-z0-9_$])\$(?!\s)([^$\n<>]{1,200}?)(?<!\s)\$(?![A-Za-z0-9_$])'
+)
+_PRE_OR_CODE_RE = re.compile(r'<(pre|code)\b[^>]*>[\s\S]*?</\1>', re.IGNORECASE)
+_BR_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
 
 # 著者・コメンテーターのプロフィール画像として知られている CDN ホスト
 _PROFILE_IMG_HOSTS = {
@@ -141,7 +153,58 @@ def _fix_html(html: str, base_url: str = "") -> str:
         return tag
 
     html = re.sub(r'<img\b[^>]*>', _fix_img_tag, html)
+
+    # Qiita 等が本文に埋める生のドル記法を <code class="math-tex"> へ変換する
+    html = _convert_dollar_math(html)
     return html
+
+
+def _convert_dollar_math(html: str) -> str:
+    """抽出後 HTML 内の $$...$$ / $...$ を <code class="math-tex"> に変換する。
+
+    <pre>/<code> 内のドル記号は対象外にするため、いったん退避してから戻す。
+    """
+    import html as html_mod
+
+    # pre/code ブロックを退避
+    placeholders: list[str] = []
+
+    def _stash(m: re.Match) -> str:
+        placeholders.append(m.group(0))
+        return f'\x00CODE{len(placeholders) - 1}\x00'
+
+    stashed = _PRE_OR_CODE_RE.sub(_stash, html)
+
+    def _block(m: re.Match) -> str:
+        inner = m.group(1)
+        # <br/> を空白に正規化して LaTeX 内の改行扱いにする
+        latex = _BR_RE.sub(' ', inner).strip()
+        # 残った HTML タグは除去 (Qiita では <br> 以外まず入らない)
+        latex = _TAG_STRIP_RE.sub(' ', latex).strip()
+        latex = html_mod.unescape(latex)
+        if not latex:
+            return m.group(0)
+        return f'<code class="math-tex" data-display="display" data-latex="{html_mod.escape(latex)}"></code>'
+
+    def _inline(m: re.Match) -> str:
+        latex = m.group(1)
+        # 1 行で完結するインラインに <br> や複数行が混ざる可能性は低いが念のため正規化
+        latex = _BR_RE.sub(' ', latex).strip()
+        latex = _TAG_STRIP_RE.sub(' ', latex).strip()
+        latex = html_mod.unescape(latex)
+        if not latex:
+            return m.group(0)
+        return f'<code class="math-tex" data-display="inline" data-latex="{html_mod.escape(latex)}"></code>'
+
+    stashed = _BLOCK_DOLLAR_RE.sub(_block, stashed)
+    stashed = _INLINE_DOLLAR_RE.sub(_inline, stashed)
+
+    # 退避していた pre/code を戻す
+    def _restore(m: re.Match) -> str:
+        idx = int(m.group(1))
+        return placeholders[idx]
+
+    return re.sub(r'\x00CODE(\d+)\x00', _restore, stashed)
 
 
 def _find_yahoo_next_url(html_bytes: bytes) -> str | None:
