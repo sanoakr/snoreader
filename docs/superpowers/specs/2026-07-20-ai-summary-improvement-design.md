@@ -20,7 +20,9 @@
 AI サマリー生成には2つの経路があり、どちらも「日本語箇条書き ・ 始まり、EXACTLY 3項目」という同一ルールを別々のシステムプロンプトに重複して持っている。
 
 - `backend/app/ai/summarizer.py` の `summarize_article()` — 要約のみを (再)生成する単体呼び出し。`POST /api/articles/{id}/summarize` から使用
-- `backend/app/ai/processor.py` の `summarize_and_tag()` — 要約 + タグ提案を1回の LLM 呼び出しで行う。Ternary-Bonsai-8B モデルが SUMMARY セクションに続けてでないとタグを安定生成できないための構成。`background_processor.py` の Phase 1/2、`POST /api/articles/{id}/extract` から使用
+- `backend/app/ai/processor.py` の `summarize_and_tag()` — 要約 + タグ提案を1回の LLM 呼び出しで行う。SUMMARY セクションに続けてでないとタグを安定生成できないための構成。`background_processor.py` の Phase 1/2、`POST /api/articles/{id}/extract` から使用
+
+> **注記**: `processor.py` / `background_processor.py` のコード内コメントおよび `CLAUDE.md` には現在 "Ternary-Bonsai-8B" と記載されているが、実際に `com.ccxa.mlx-lm-server` launchd サービスで起動中のモデルは `gemma-4-e4b-it-4bit`（Gemma 4）であることを確認した（`mlx_lm.server --model /Users/sano/models/gemma-4-e4b-it-4bit`、`com.ccxa.snoreader.plist` の `SNOREADER_LLM_MODEL` も同じパス）。古いモデル名の記述は本設計のスコープ外だが、別途修正が必要。
 
 ## 設計
 
@@ -72,7 +74,7 @@ async def regenerate_summaries(session: AsyncSession = Depends(get_session)):
 
 ## 既知のリスク
 
-Ternary-Bonsai-8B は過去のコードコメントから、"EXACTLY 3" のような厳格な指示でないと出力フォーマットを守らない傾向があったことが伺える。「1〜9個、できるだけ少なく」という曖昧な指示にどこまで従うかは実装後の実地確認が必要。パース側は 9 個で打ち切り・0個なら失敗扱いで防御するが、モデルが指示に従わない場合はプロンプトの追加チューニングが必要になる可能性がある。
+過去のコードコメントから、現行モデル（Gemma 4 / `gemma-4-e4b-it-4bit`）は "EXACTLY 3" のような厳格な指示でないと出力フォーマットを守らない傾向があったことが伺える。「1〜9個、できるだけ少なく」という曖昧な指示にどこまで従うかは実装後の実地確認が必要。パース側は 9 個で打ち切り・0個なら失敗扱いで防御するが、モデルが指示に従わない場合はプロンプトの追加チューニングが必要になる可能性がある。
 
 ## テスト方針
 
