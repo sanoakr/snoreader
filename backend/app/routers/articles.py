@@ -835,6 +835,27 @@ async def regenerate_tag_suggestions(
     return {"cleared": result.rowcount or 0}
 
 
+@router.post("/articles/regenerate-summaries", response_model=dict)
+async def regenerate_summaries(
+    session: AsyncSession = Depends(get_session),
+):
+    """既存の ai_summary を NULL に戻し、background processor の Phase 1 に再生成させる。
+
+    AIサマリー改善（タイトル重複排除・結論必須・1〜9項目化）のプロンプト変更を
+    既存記事にも反映するための管理用エンドポイント。
+
+    副作用: Phase 1 は summarize_and_tag で要約とタグを同時生成するため、
+    対象記事の tag_suggestions も併せて上書きされる（許容済み）。
+    """
+    result = await session.execute(
+        update(Article)
+        .where(Article.ai_summary.isnot(None))
+        .values(ai_summary=None)
+    )
+    await session.commit()
+    return {"cleared": result.rowcount or 0}
+
+
 @router.get("/ai/status")
 async def ai_status(session: AsyncSession = Depends(get_session)):
     """Check LLM availability and background processing queue depth."""

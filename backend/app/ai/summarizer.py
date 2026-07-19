@@ -5,31 +5,30 @@ from __future__ import annotations
 import hashlib
 import logging
 
+from app.ai import summary_rules
 from app.ai.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a concise article summarizer. "
-    "ALWAYS respond in Japanese, regardless of the article's language. "
-    "Summarize as EXACTLY 3 bullet points, each starting with '・'. "
-    "Focus on key facts and takeaways. Do not add opinions. "
-    "Return ONLY the 3 bullet points in Japanese. "
-    "Do NOT output any English tags, labels, or 'word|translation' pairs. "
-    "Do NOT output section headers like 'SUMMARY:' or 'TAGS:'. "
-    "Output ONLY exactly 3 Japanese bullet points starting with '・', nothing else."
+    "ALWAYS respond in Japanese, regardless of the article's language.\n"
+    "Rules:\n"
+    f"{summary_rules.SUMMARY_RULES}\n"
+    "- Do NOT output any English tags, labels, or 'word|translation' pairs\n"
+    "- Do NOT output section headers like 'SUMMARY:' or 'TAGS:'\n"
+    "Output ONLY the Japanese bullet points starting with '・', nothing else."
 )
 
 
 def _clean_summary(raw: str) -> str | None:
-    """Extract only ・-prefixed lines from LLM output, capped at exactly 3."""
+    """Extract ・-prefixed lines from LLM output and finalize them."""
     lines = [
         line.strip()
         for line in raw.splitlines()
         if line.strip().startswith("・")
     ]
-    lines = lines[:3]
-    return "\n".join(lines) if lines else None
+    return summary_rules.finalize_bullets(lines)
 
 
 async def summarize_article(title: str, text: str, priority: int | None = None) -> str | None:

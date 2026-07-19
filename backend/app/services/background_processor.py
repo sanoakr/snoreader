@@ -3,7 +3,7 @@
 Replaces the APScheduler-based _summarize_job. Runs as a persistent asyncio task,
 processing one article at a time to keep the LLM queue free for foreground requests.
 
-Uses a single combined LLM call (summarize_and_tag) because the Ternary-Bonsai-8B
+Uses a single combined LLM call (summarize_and_tag) because the Gemma 4
 model can only generate tag pairs reliably as part of a structured SUMMARY+TAGS output.
 """
 from __future__ import annotations
