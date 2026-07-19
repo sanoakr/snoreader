@@ -10,6 +10,7 @@ import hashlib
 import logging
 import re
 
+from app.ai import summary_rules
 from app.ai.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
@@ -19,19 +20,15 @@ _SYSTEM_PROMPT = (
     "Output format (follow EXACTLY — no extra text):\n"
     "SUMMARY:\n"
     "・<bullet point in Japanese>\n"
-    "・<bullet point in Japanese>\n"
     "TAGS: <english>|<日本語>, <english>|<日本語>\n\n"
     "Rules:\n"
-    "- SUMMARY: EXACTLY 3 Japanese bullet points, key facts only, no opinions\n"
-    "- SUMMARY bullets start with '・' and contain ONLY Japanese text — no English|Japanese pairs\n"
+    f"{summary_rules.SUMMARY_RULES}\n"
     "- TAGS: 1-3 specific topic tags; single lowercase English word (or hyphenated) + Japanese translation\n"
     "- Choose the most specific accurate tag — only use 'ai', 'technology', or 'news' if that is the article's primary subject\n"
     "- If existing tags are provided, reuse them when appropriate\n"
     "- Return ONLY the formatted block above, nothing else"
 )
 
-# Rejects summary bullets containing tag-format annotations like "security|セキュリティ"
-_TAG_IN_BULLET = re.compile(r"\b[a-z]{2,}\|")
 # Valid English tag: starts with a-z, contains only a-z/0-9/hyphen, 1-29 total chars
 _VALID_EN_TAG = re.compile(r"^[a-z][a-z0-9-]{0,28}$")
 
@@ -51,11 +48,9 @@ def _parse_output(raw: str) -> tuple[str | None, list[tuple[str, str | None]]]:
             in_summary = False
             tags_str = stripped[5:].strip()
         elif in_summary and stripped.startswith("・"):
-            # Only accept ・-prefixed lines; skip bullets with tag-format annotations
-            if not _TAG_IN_BULLET.search(stripped):
-                summary_lines.append(stripped)
+            summary_lines.append(stripped)
 
-    summary = "\n".join(summary_lines[:3]) if summary_lines else None
+    summary = summary_rules.finalize_bullets(summary_lines)
 
     pairs: list[tuple[str, str | None]] = []
     for item in re.split(r"[,\n]", tags_str):
