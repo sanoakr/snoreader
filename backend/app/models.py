@@ -41,12 +41,15 @@ class Article(Base):
         Index("idx_articles_published_at", "published_at"),
         Index("idx_articles_is_read", "is_read"),
         Index("idx_articles_is_saved", "is_saved"),
+        Index("idx_articles_normalized_url", "normalized_url"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     feed_id: Mapped[int] = mapped_column(Integer, ForeignKey("feeds.id", ondelete="CASCADE"), nullable=False)
     guid: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str] = mapped_column(String, nullable=False)
+    # フィード横断の重複判定キー（比較専用。utm 等除去済み）。既存 DB では lifespan でバックフィルされる
+    normalized_url: Mapped[str | None] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False, default="")
     summary: Mapped[str] = mapped_column(Text, default="")
     content: Mapped[str | None] = mapped_column(Text)

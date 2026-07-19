@@ -89,6 +89,20 @@ export function markAllRead(feedId?: number): Promise<{ marked: number }> {
   });
 }
 
+export interface DedupResult {
+  duplicate_groups: number;
+  deleted: number;
+  dry_run: boolean;
+}
+
+export function dedupArticles(dryRun: boolean): Promise<DedupResult> {
+  return fetchJSON(`${BASE}/articles/dedup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: dryRun }),
+  });
+}
+
 
 // --- AI ---
 

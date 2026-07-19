@@ -79,6 +79,7 @@ tail -f ~/snoreader/logs/snoreader.out.log
 - `PATCH /api/articles/:id` — 記事状態更新 (既読/保管)
 - `POST /api/articles/:id/extract` — 記事本文抽出 (trafilatura)
 - `POST /api/articles/mark-all-read` — 一括既読
+- `POST /api/articles/dedup` — フィード横断の重複記事削除（はてなブックマーク由来を優先削除、`dry_run` 対応）
 
 ### 検索
 - `GET /api/search?q=...` — 全文検索 (FTS5)
