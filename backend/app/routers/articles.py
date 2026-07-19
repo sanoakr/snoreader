@@ -830,6 +830,9 @@ async def regenerate_summaries(
 
     AIサマリー改善（タイトル重複排除・結論必須・1〜9項目化）のプロンプト変更を
     既存記事にも反映するための管理用エンドポイント。
+
+    副作用: Phase 1 は summarize_and_tag で要約とタグを同時生成するため、
+    対象記事の tag_suggestions も併せて上書きされる（許容済み）。
     """
     result = await session.execute(
         update(Article)
