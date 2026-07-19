@@ -12,6 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Article, Feed
+from app.services.deduplicator import dedup_articles, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ async def fetch_feed(feed: Feed, session: AsyncSession) -> int:
             feed_id=feed.id,
             guid=guid,
             url=url,
+            normalized_url=normalize_url(url),
             title=entry.get("title", ""),
             summary=_summary_text(entry),
             author=entry.get("author"),
@@ -157,3 +159,6 @@ async def fetch_all_feeds() -> None:
                     await fetch_feed(feed, sess)
 
     await asyncio.gather(*[_fetch_one(fid) for fid in feed_ids])
+
+    async with async_session() as session:
+        await dedup_articles(session)

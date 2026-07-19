@@ -7,12 +7,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.database import engine
-from app.models import Base
+from app.database import async_session, engine
+from app.models import Article, Base
 from app.ai import task_queue
 from app.routers import articles, exports, feeds, imports, opml, tags
 from app.services.background_processor import start as start_bg_processor
 from app.services.background_processor import stop as stop_bg_processor
+from app.services.deduplicator import normalize_url
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 # trigram トークナイザは CJK の部分一致検索に対応する（unicode61 では空白で
@@ -48,6 +49,23 @@ FTS_TRIGGERS = [
 ]
 
 
+async def _backfill_normalized_urls() -> None:
+    """既存記事のうち normalized_url 未設定のものを埋める（新規カラム追加時のみ実質処理あり）。"""
+    from sqlalchemy import select, update
+
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(Article.id, Article.url).where(Article.normalized_url.is_(None))
+            )
+        ).all()
+        updates = [{"id": aid, "normalized_url": normalize_url(url)} for aid, url in rows]
+        for i in range(0, len(updates), 1000):
+            await session.execute(update(Article), updates[i : i + 1000])
+        if updates:
+            await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create tables
@@ -63,6 +81,14 @@ async def lifespan(app: FastAPI):
             await conn.execute(
                 text("ALTER TABLE articles ADD COLUMN extract_attempts INTEGER DEFAULT 0")
             )
+        if "normalized_url" not in existing_article_cols:
+            await conn.execute(text("ALTER TABLE articles ADD COLUMN normalized_url TEXT"))
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_articles_normalized_url "
+                "ON articles(normalized_url)"
+            )
+        )
 
         # 既存 FTS テーブルが古いトークナイザのまま残っていれば作り直す
         existing = await conn.execute(
@@ -87,6 +113,8 @@ async def lifespan(app: FastAPI):
             await conn.execute(
                 text("INSERT INTO articles_fts(articles_fts) VALUES('rebuild')")
             )
+
+    await _backfill_normalized_urls()
 
     task_queue.start()
     start_scheduler()

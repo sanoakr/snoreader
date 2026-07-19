@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.models import Article, Feed
 from app.schemas import FeedCreate, FeedOut, FeedUpdate
+from app.services.deduplicator import dedup_articles
 from app.services.feed_fetcher import fetch_feed
 
 router = APIRouter(tags=["feeds"])
@@ -84,4 +85,5 @@ async def refresh_feed(feed_id: int, session: AsyncSession = Depends(get_session
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
     new_count = await fetch_feed(feed, session)
+    await dedup_articles(session)
     return {"new_articles": new_count}

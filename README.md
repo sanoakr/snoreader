@@ -23,6 +23,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - Extract-failure management UI — articles whose body fetch failed are classified (404 / 403 / transient error / user-skipped) and surfaced in a sidebar modal with per-article **retry / summary-only / delete** actions, plus bulk ops. Transient errors auto-retry after a 5-minute backoff; permanent failures stop blocking LLM summarization so Phase 1 falls back to the RSS summary
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
+- Cross-feed duplicate cleanup — matches articles by normalized URL (tracking params/fragment stripped), keeping saved > non-Hatena-Bookmark > oldest fetched, and merges read/saved state and tags from the removed copy. Runs automatically after each scheduled fetch, plus an on-demand "重複記事を整理" button in the sidebar with a dry-run preview
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)
 - Mobile top bar shows the current category, view total, and overall unread count
 - Dark mode support

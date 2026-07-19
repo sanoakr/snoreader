@@ -63,3 +63,15 @@ export function useImportArticles() {
     },
   });
 }
+
+export function useDedupArticles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dryRun: boolean) => api.dedupArticles(dryRun),
+    onSuccess: (result) => {
+      if (result.dry_run) return;
+      qc.invalidateQueries({ queryKey: ['feeds'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+    },
+  });
+}

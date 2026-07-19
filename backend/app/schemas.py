@@ -104,6 +104,16 @@ class MarkAllReadRequest(BaseModel):
     feed_id: int | None = None
 
 
+class DedupRequest(BaseModel):
+    dry_run: bool = False
+
+
+class DedupResponse(BaseModel):
+    duplicate_groups: int
+    deleted: int
+    dry_run: bool
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):

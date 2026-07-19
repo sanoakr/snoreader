@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
-import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles } from '../../hooks/useFeeds';
+import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles, useDedupArticles } from '../../hooks/useFeeds';
 import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
@@ -22,6 +22,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const refreshFeed = useRefreshFeed();
   const importOpml = useImportOpml();
   const importArticles = useImportArticles();
+  const dedupArticles = useDedupArticles();
   const renameTag = useRenameTag();
   const bulkDeleteTags = useBulkDeleteTags();
   const aiTagSaved = useAiTagSaved();
@@ -61,6 +62,19 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
     const file = e.target.files?.[0];
     if (file) importArticles.mutate(file);
     e.target.value = '';
+  };
+
+  const handleDedup = async () => {
+    const preview = await dedupArticles.mutateAsync(true);
+    if (preview.deleted === 0) {
+      alert('重複記事はありません');
+      return;
+    }
+    const ok = confirm(
+      `重複記事 ${preview.deleted} 件（${preview.duplicate_groups} グループ）を削除します。よろしいですか?`
+    );
+    if (!ok) return;
+    await dedupArticles.mutateAsync(false);
   };
 
   const handleRenameSubmit = (tagId: number) => {
@@ -376,6 +390,22 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             )}
             {importArticles.isError && (
               <p className="text-xs text-red-500">{(importArticles.error as Error).message}</p>
+            )}
+            <button
+              onClick={handleDedup}
+              disabled={dedupArticles.isPending}
+              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
+              title="フィード横断で同一URLの重複記事を検出し、はてなブックマーク由来を優先して削除する"
+            >
+              {dedupArticles.isPending ? '確認中...' : '重複記事を整理'}
+            </button>
+            {dedupArticles.isSuccess && dedupArticles.data.dry_run === false && (
+              <p className="text-xs text-green-600">
+                重複記事 {dedupArticles.data.deleted} 件を削除しました
+              </p>
+            )}
+            {dedupArticles.isError && (
+              <p className="text-xs text-red-500">{(dedupArticles.error as Error).message}</p>
             )}
           </>
         )}

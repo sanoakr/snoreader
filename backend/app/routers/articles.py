@@ -24,11 +24,14 @@ from app.schemas import (
     ArticleOut,
     ArticleUpdate,
     ChatSource,
+    DedupRequest,
+    DedupResponse,
     ExtractActionRequest,
     MarkAllReadRequest,
     PaginatedArticles,
     TagSuggestion,
 )
+from app.services.deduplicator import dedup_articles
 
 router = APIRouter(tags=["articles"])
 
@@ -526,6 +529,16 @@ async def mark_all_read(
         count += 1
     await session.commit()
     return {"marked": count}
+
+
+@router.post("/articles/dedup", response_model=DedupResponse)
+async def dedup_articles_endpoint(
+    body: DedupRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """フィード横断の重複記事を検出して削除する（はてなブックマーク由来を優先削除）。"""
+    result = await dedup_articles(session, dry_run=body.dry_run, refresh_keys=True)
+    return DedupResponse(**result)
 
 
 @router.post("/articles/{article_id}/extract", response_model=ArticleDetail)

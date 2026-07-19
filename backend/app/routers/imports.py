@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Article, Feed
+from app.services.deduplicator import normalize_url
 
 router = APIRouter(tags=["import"])
 
@@ -156,6 +157,7 @@ async def import_articles(
             feed_id=feed.id,
             guid=item["url"],
             url=item["url"],
+            normalized_url=normalize_url(item["url"]),
             title=item["title"],
             summary=item["summary"],
             author=item["author"],
