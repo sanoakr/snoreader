@@ -1,6 +1,6 @@
 """Combined article processor: summary + tag suggestions in a single LLM call.
 
-Using a single call is required for the Ternary-Bonsai-8B model, which can only
+Using a single call is required for the Gemma 4 model, which can only
 generate tag pairs reliably when it continues from a SUMMARY section it just wrote.
 """
 

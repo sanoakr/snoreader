@@ -8,7 +8,7 @@
 - **Frontend**: React 19 + Vite + TypeScript + Tailwind CSS + TanStack Query
 - **Feed**: feedparser, 記事本文抽出: trafilatura
 - **スケジューラ**: APScheduler 3.x
-- **将来の LLM**: Ternary Bonsai 8B via mlx-lm.server
+- **将来の LLM**: Gemma 4 (gemma-4-e4b-it-4bit) via mlx-lm.server
 
 ## 開発コマンド
 
@@ -109,7 +109,7 @@ tail -f ~/snoreader/logs/snoreader.out.log
 
 ```bash
 # LLM サーバー起動 (別ターミナル)
-mlx_lm.server --model prism-ml/Ternary-Bonsai-8B-mlx-2bit --port 8880
+mlx_lm.server --model /Users/sano/models/gemma-4-e4b-it-4bit --port 8880
 ```
 
 環境変数で設定変更可能:
