@@ -146,7 +146,7 @@ async def test_cleanup_keeps_recent_unsaved_read_article(client: AsyncClient) ->
         feed = await _make_feed(session, "https://a.example.com/feed")
         await _make_article(
             session, feed.id, "g1", "https://news.example.com/recent",
-            published_at=_iso(89), is_read=True, is_saved=False,
+            published_at=_iso(59), is_read=True, is_saved=False,
         )
         await session.commit()
 
