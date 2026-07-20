@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = f"sqlite+aiosqlite:///{Path(__file__).resolve().parent.parent.parent / 'data' / 'snoreader.db'}"
     feed_fetch_interval_minutes: int = 60
+    article_retention_days: int = 90
     host: str = "0.0.0.0"
     port: int = 8000
 
