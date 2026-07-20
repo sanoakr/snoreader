@@ -144,6 +144,7 @@ async def fetch_all_feeds() -> None:
     import asyncio
 
     from app.database import async_session
+    from app.services.article_cleanup import cleanup_old_articles
 
     async with async_session() as session:
         result = await session.execute(select(Feed))
@@ -162,3 +163,4 @@ async def fetch_all_feeds() -> None:
 
     async with async_session() as session:
         await dedup_articles(session)
+        await cleanup_old_articles(session)

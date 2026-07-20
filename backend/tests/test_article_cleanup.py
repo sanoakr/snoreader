@@ -206,3 +206,36 @@ async def test_cleanup_respects_retention_days_override(
 
         remaining = (await session.execute(select(Article))).scalars().all()
         assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_feeds_runs_cleanup(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """fetch_all_feeds() の実行後、保持期間を過ぎた未保存既読記事が削除されていること。
+
+    実際の RSS フェッチ (HTTP) はこのテストの対象外のため fetch_feed をスタブ化し、
+    dedup/cleanup の配線のみを検証する。
+    """
+    from app.database import async_session
+    from app.models import Article
+    from app.services import feed_fetcher
+
+    async def _noop_fetch_feed(feed, session) -> int:
+        return 0
+
+    monkeypatch.setattr(feed_fetcher, "fetch_feed", _noop_fetch_feed)
+
+    async with async_session() as session:
+        feed = await _make_feed(session, "https://a.example.com/feed")
+        await _make_article(
+            session, feed.id, "g1", "https://news.example.com/old",
+            published_at=_iso(91), is_read=True, is_saved=False,
+        )
+        await session.commit()
+
+    await feed_fetcher.fetch_all_feeds()
+
+    async with async_session() as session:
+        remaining = (await session.execute(select(Article))).scalars().all()
+        assert remaining == []
