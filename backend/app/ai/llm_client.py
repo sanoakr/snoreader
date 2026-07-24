@@ -16,11 +16,14 @@ async def chat_completion(
     max_tokens: int = 512,
     temperature: float = 0.3,
     priority: int | None = None,
+    lane: str = "reserved",
 ) -> str | None:
     """Send a chat completion request through the priority queue.
 
     Returns the assistant message content, or None on failure.
-    priority defaults to PRIORITY_BACKGROUND when omitted.
+    priority defaults to PRIORITY_BACKGROUND when omitted. lane defaults to
+    "reserved" (shared by foreground calls and Phase 2); background_processor's
+    Phase 1 explicitly passes lane="bulk" — see app/ai/task_queue.py.
     """
     from app.ai.task_queue import PRIORITY_BACKGROUND, enqueue
 
@@ -51,7 +54,7 @@ async def chat_completion(
             logger.warning("LLM request failed: %s", e)
             return None
 
-    return await enqueue(_call, priority)
+    return await enqueue(_call, priority, lane)
 
 
 async def is_available() -> bool:
