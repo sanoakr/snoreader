@@ -75,6 +75,24 @@ def test_normalize_url_empty_passthrough():
     assert normalize_url("") == ""
 
 
+def test_normalize_url_strips_display_param():
+    a = normalize_url("https://toyokeizai.net/articles/-/948701?display=b")
+    b = normalize_url("https://toyokeizai.net/articles/-/948701")
+    assert a == b
+
+
+def test_normalize_url_strips_www_prefix():
+    a = normalize_url("https://www.animatetimes.com/news/details.php?id=1")
+    b = normalize_url("https://animatetimes.com/news/details.php?id=1")
+    assert a == b
+
+
+def test_normalize_url_applies_domain_alias():
+    a = normalize_url("https://www.asahi.com/articles/ASV6V15JYV6VDIFI00TM.html")
+    b = normalize_url("https://digital.asahi.com/articles/ASV6V15JYV6VDIFI00TM.html")
+    assert a == b
+
+
 # --- サービス層 / エンドポイントの統合テスト ---
 
 @pytest_asyncio.fixture

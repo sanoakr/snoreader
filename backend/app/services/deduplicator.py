@@ -24,9 +24,16 @@ _TRACKING_PARAMS = {
     "mc_cid", "mc_eid",  # Mailchimp
     "_hsenc", "_hsmi", "mkt_tok",  # HubSpot / Marketo
     "n_cid", "cx_testId",  # 国内メディア配信系
+    "display",  # toyokeizai.net / newsweekjapan.jp 等の表示モード切替 (?display=b)。同一記事
 }
 # 意図的に除去しない: ref / source / from は GitHub 等で機能パラメータとして使われるため、
 # 除去すると誤って別記事を同一視するリスクがある（見逃す方向の方が安全）。
+
+# 既知のドメイン移行・別名（旧ホスト → 新ホスト）。www. 除去後のホストで引くのでキーに www. は含めない。
+_DOMAIN_ALIASES = {
+    "asahi.com": "digital.asahi.com",
+    "delete-all.hatenablog.com": "soredoko.jp",
+}
 
 _HATENA_MARKER = "b.hatena.ne.jp"
 
@@ -45,6 +52,9 @@ def normalize_url(url: str) -> str:
     try:
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        host = _DOMAIN_ALIASES.get(host, host)
         if parts.port and not (
             (parts.scheme == "http" and parts.port == 80)
             or (parts.scheme == "https" and parts.port == 443)

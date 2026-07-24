@@ -3,6 +3,7 @@ import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles, useDedupArticles } from '../../hooks/useFeeds';
 import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
+import { useExcludePatterns, useCreateExcludePattern, useDeleteExcludePattern } from '../../hooks/useExcludePatterns';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
 import type { ArticleFilters } from '../../types';
 
@@ -28,11 +29,16 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const aiTagSaved = useAiTagSaved();
   const autoTagSaved = useAutoTagSaved();
   const fillTranslations = useFillTagTranslations();
+  const { data: excludePatterns } = useExcludePatterns();
+  const createExcludePattern = useCreateExcludePattern();
+  const deleteExcludePattern = useDeleteExcludePattern();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [tagManageMode, setTagManageMode] = useState(false);
   const [editingTagId, setEditingTagId] = useState<number | null>(null);
   const [editingTagName, setEditingTagName] = useState('');
+  const [excludeManageMode, setExcludeManageMode] = useState(false);
+  const [newExcludePattern, setNewExcludePattern] = useState('');
   const opmlFileRef = useRef<HTMLInputElement>(null);
   const articlesFileRef = useRef<HTMLInputElement>(null);
 
@@ -75,6 +81,16 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
     );
     if (!ok) return;
     await dedupArticles.mutateAsync(false);
+  };
+
+  const handleAddExcludePattern = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newExcludePattern.trim()) return;
+    const result = await createExcludePattern.mutateAsync(newExcludePattern.trim());
+    setNewExcludePattern('');
+    if (result.purged > 0) {
+      alert(`既存の一致記事 ${result.purged} 件を削除しました`);
+    }
   };
 
   const handleRenameSubmit = (tagId: number) => {
@@ -406,6 +422,48 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             )}
             {dedupArticles.isError && (
               <p className="text-xs text-red-500">{(dedupArticles.error as Error).message}</p>
+            )}
+            <button
+              onClick={() => setExcludeManageMode(m => !m)}
+              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
+              title="URLパターンに一致する記事をフェッチ時にスキップする"
+            >
+              {excludeManageMode ? '除外パターン管理を閉じる' : '除外パターン管理'}
+            </button>
+            {excludeManageMode && (
+              <div className="space-y-1 px-1">
+                {excludePatterns?.map((p) => (
+                  <div key={p.id} className="flex items-center gap-1 group">
+                    <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">{p.pattern}</span>
+                    <button
+                      onClick={() => { if (confirm(`パターン "${p.pattern}" を削除しますか?`)) deleteExcludePattern.mutate(p.id); }}
+                      className="text-gray-400 hover:text-red-500 text-sm px-1 leading-none"
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <form onSubmit={handleAddExcludePattern} className="flex gap-1">
+                  <input
+                    type="text"
+                    value={newExcludePattern}
+                    onChange={(e) => setNewExcludePattern(e.target.value)}
+                    placeholder="例: tonarinoyj.jp/episode/*"
+                    className="flex-1 min-w-0 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+                  />
+                  <button
+                    type="submit"
+                    disabled={createExcludePattern.isPending}
+                    className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    追加
+                  </button>
+                </form>
+                {createExcludePattern.isError && (
+                  <p className="text-xs text-red-500">{(createExcludePattern.error as Error).message}</p>
+                )}
+              </div>
             )}
           </>
         )}

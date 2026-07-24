@@ -11,8 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Article, Feed
+from app.models import Article, ExcludePattern, Feed
 from app.services.deduplicator import dedup_articles, normalize_url
+from app.services.url_filters import is_excluded
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,10 @@ async def fetch_feed(feed: Feed, session: AsyncSession) -> int:
         origin = urlparse(feed.site_url)
         feed.favicon_url = f"{origin.scheme}://{origin.netloc}/favicon.ico"
 
+    exclude_patterns = list(
+        (await session.execute(select(ExcludePattern.pattern))).scalars()
+    )
+
     new_count = 0
     now = datetime.now(timezone.utc).isoformat()
 
@@ -111,6 +116,8 @@ async def fetch_feed(feed: Feed, session: AsyncSession) -> int:
         guid = entry.get("id", entry.get("link", ""))
         url = entry.get("link", "")
         if not guid or not url:
+            continue
+        if is_excluded(url, exclude_patterns):
             continue
 
         stmt = sqlite_upsert(Article).values(

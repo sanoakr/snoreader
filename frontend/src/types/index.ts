@@ -24,6 +24,13 @@ export interface TagSuggestion {
   existing?: boolean;
 }
 
+export interface ExcludePattern {
+  id: number;
+  pattern: string;
+  created_at: string;
+  purged: number;
+}
+
 export interface Article {
   id: number;
   feed_id: number;

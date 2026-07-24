@@ -84,6 +84,16 @@ class Tag(Base):
     articles: Mapped[list["Article"]] = relationship(secondary="article_tags", back_populates="tags")
 
 
+class ExcludePattern(Base):
+    """フェッチ時に URL がマッチしたら記事を保存せずスキップするパターン。"""
+
+    __tablename__ = "exclude_patterns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pattern: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, default=_utcnow)
+
+
 class ArticleTag(Base):
     __tablename__ = "article_tags"
 

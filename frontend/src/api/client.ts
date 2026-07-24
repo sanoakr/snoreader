@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ExtractAction, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ExcludePattern, ExtractAction, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -101,6 +101,24 @@ export function dedupArticles(dryRun: boolean): Promise<DedupResult> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
   });
+}
+
+// --- Exclude patterns ---
+
+export function getExcludePatterns(): Promise<ExcludePattern[]> {
+  return fetchJSON(`${BASE}/exclude-patterns`);
+}
+
+export function createExcludePattern(pattern: string): Promise<ExcludePattern> {
+  return fetchJSON(`${BASE}/exclude-patterns`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pattern }),
+  });
+}
+
+export function deleteExcludePattern(id: number): Promise<void> {
+  return fetchJSON(`${BASE}/exclude-patterns/${id}`, { method: 'DELETE' });
 }
 
 

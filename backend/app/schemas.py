@@ -114,6 +114,21 @@ class DedupResponse(BaseModel):
     dry_run: bool
 
 
+# --- Exclude patterns ---
+
+class ExcludePatternCreate(BaseModel):
+    pattern: str
+
+
+class ExcludePatternOut(BaseModel):
+    id: int
+    pattern: str
+    created_at: str
+    purged: int = 0
+
+    model_config = {"from_attributes": True}
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):
