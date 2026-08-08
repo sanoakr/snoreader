@@ -40,9 +40,9 @@ sports 21 (3%)  security 20 (3%)
 
 ## スコープ
 
-**含む**: ジャンル分類器、ジャンル別の未読一覧、ジャンル単位の一括既読・一括 dismiss、Dismissed ビューと復元。
+**含む**: ジャンル分類器、編集可能なジャンル定義（DB + CRUD + 管理 UI）、ジャンル別の未読一覧、ジャンル単位の一括既読・一括 dismiss、Dismissed ビューと復元。
 
-**含まない**: 流入抑制（自動 dismiss ルール）、ジャンルの UI 上での編集、dismissed 記事の自動削除。
+**含まない**: 流入抑制（自動 dismiss ルール）、dismissed 記事の自動削除、ジャンルの自動学習（どのタグをどのジャンルに置くかを利用実績から提案する類）。
 
 ## 「捨てる」の定義
 
@@ -53,6 +53,35 @@ sports 21 (3%)  security 20 (3%)
 dismissed 記事の保持期間は設けない。1 記事は数 KB であり、溜まって困る規模になってから別途検討する。
 
 ## データモデル
+
+### ジャンル定義（編集可能にする）
+
+ジャンルの粒度と分け方は使いながら直すものなので、コード内定数ではなく DB に置き、既存の `ExcludePattern`（`models.py:87`, `routers/exclude_patterns.py`）と同じ CRUD + サイドバー UI の作法で編集できるようにする。ルールを変えたらその場で既存記事へ適用される点も、除外パターンが追加時に既存記事を即 purge するのと揃える。
+
+```python
+class Genre(Base):
+    __tablename__ = "genres"
+    id: int
+    key: str        # 一意。API とフィルタで使う英語キー（例: "ai"）
+    label_ja: str   # 表示名（例: "AI・LLM"）
+    priority: int   # 小さいほど優先。タグが複数ジャンルにヒットしたときの解決順
+    created_at: str
+
+class GenreRule(Base):
+    __tablename__ = "genre_rules"
+    id: int
+    tag: str          # 一意。tag_suggestions に現れる英語タグ
+    genre_id: int     # ForeignKey("genres.id", ondelete="CASCADE")
+    is_generic: bool  # True のルールは他に手がかりが無いときだけ使う（technology, news 等）
+```
+
+どちらも新規テーブルなので `create_all` が作る（`ALTER TABLE` は不要）。
+
+`other` は予約キーとし、DB には置かない。どのルールにも当たらなかった記事が入る受け皿であり、`genres` に行が無いため `GenreRule` から参照することもできない。
+
+初回起動時、`genres` が空のときだけ後述の初期辞書をシードする（`main.py` の lifespan、既存のバックフィルと同じ位置）。シード値は `app/services/genre_seed.py` に定数として置く。以後シードは走らないので、ユーザーの編集が上書きされることはない。
+
+### Article への追加カラム
 
 `Article` に 2 カラムを追加する。`create_all` は既存テーブルを変更しないため、`main.py` の既存の手動マイグレーション（`main.py:75-89` の `PRAGMA table_info` → `ALTER TABLE` パターン）に追記する。
 
@@ -73,23 +102,32 @@ await conn.execute(
 
 ## ジャンル分類器
 
-新規モジュール `backend/app/services/genre_classifier.py`。
+新規モジュール `backend/app/services/genre_classifier.py`。分類そのものは DB に触らない純関数とし、ルールは呼び出し側が渡す。こうすることで辞書が DB 由来になってもテストは固定値で書ける。
 
 ```python
-GENRE_PRIORITY: list[tuple[str, list[str]]]  # 優先順位順。先に来たジャンルが勝つ
-GENERIC_FALLBACK: dict[str, str]             # 汎用タグ → ジャンル
+@dataclass(frozen=True)
+class GenreRules:
+    """DB から組み立てた分類ルールのスナップショット。"""
+    tag_to_genre: dict[str, str]      # 通常ルール: tag -> genre key
+    generic_to_genre: dict[str, str]  # 汎用ルール: tag -> genre key
+    priority: dict[str, int]          # genre key -> priority（小さいほど優先）
 
-def classify(tags: list[str]) -> str:
+def classify(tags: list[str], rules: GenreRules) -> str:
     """タグ候補からジャンルを 1 つ決める。該当なしは "other"。"""
+
+async def load_rules(session: AsyncSession) -> GenreRules:
+    """genres / genre_rules から GenreRules を組み立てる。"""
 ```
 
 解決規則:
 
-1. `tags` を `GENRE_PRIORITY` の辞書で引き、ヒットしたジャンルのうち **優先順位が最も高いもの** を返す。
-2. ヒットが無ければ `GENERIC_FALLBACK`（`technology` → `dev`、`news`/`japan`/`japanese` → `other`）を順に引く。`data` は `dev` の通常辞書に入れるので、フォールバックには重複して置かない。
+1. `tags` を `tag_to_genre` で引き、ヒットしたジャンルのうち `priority` が最小のものを返す。`priority` が同値の場合は `key` の辞書順で決める（管理 UI は上下移動で一意な値を振るが、API を直接叩けば同値になりうるため、分類結果が実行ごとに揺れないようにする）。
+2. ヒットが無ければ `generic_to_genre` を `tags` の順に引く。
 3. それも無ければ `"other"`。
 
-初期辞書は調査で検証済みの以下とする（優先順位順）。地名（`okinawa`, `kumamoto`）のような修飾語は誤爆源なので辞書に入れない。
+ルール表は 150 行程度と小さく、SQLite への問い合わせも安いので、キャッシュは持たず必要な箇所で都度 `load_rules()` する。一括再分類のように多数の記事を回す場合だけ、呼び出し側でループの外に 1 回出す。
+
+初期辞書（シード値）は調査で検証済みの以下とする（優先順位順）。地名（`okinawa`, `kumamoto`）のような修飾語は誤爆源なので入れない。汎用ルールは `technology` → `dev` の 1 件のみをシードする（`news`/`japan`/`japanese` はどのジャンルにも寄せず、ルール無しのまま `other` に落とす。`other` は `genres` に行を持たないので `GenreRule.genre_id` から参照できない）。
 
 | 優先 | ジャンル | 主なタグ |
 |---|---|---|
@@ -104,26 +142,38 @@ def classify(tags: list[str]) -> str:
 | 9 | `entertainment` | entertainment, game, manga, anime, movie, music, comedy, art, story, literature, book, science-fiction, comic |
 | 10 | `life` | health, life, lifestyle, daily-life, food, recipe, travel, relationship, emotion, mental-health, home, history, culture, society, social, community, communication, social-media, railway, transportation, architecture, museum, design, writing, media |
 
-日本語表示名はフロントエンド側の定数表で持つ（バックエンドは英語キーのみを返す）。
+日本語表示名は `genres.label_ja` に持つ（`ai` → 「AI・LLM」、`dev` → 「開発・技術」、`incident` → 「事件・災害」など）。フロントは API が返す表示名をそのまま使い、定数表を持たない。
 
-辞書は完成品ではなく育てる前提とする。`other` の記事一覧をフロントから見られるようにしておき、目立つ語が溜まったら辞書に足して再分類する。
+辞書は完成品ではなく育てる前提とする。`other` の記事一覧をフロントから見られるようにしておき、目立つ語が溜まったらジャンル管理画面から割り当てる。
 
 ## 分類の適用タイミング
 
 1. **新規・更新時** — `background_processor.py` で `tag_suggestions` を書く 2 箇所（Phase 1 の `_process_one`、Phase 2 のタグバックフィル）で、同じトランザクション内で `article.genre = classify(tags)` を設定する。
 2. **バックフィル** — `main.py` の lifespan、既存の `normalized_url` バックフィルと同じ位置で、`genre IS NULL AND tag_suggestions IS NOT NULL` の行を分類して埋める。
-3. **辞書更新後の再分類** — 管理エンドポイント `POST /articles/reclassify-genres` で全件再分類する（既存の `regenerate-summaries` と同じ管理系の位置づけ）。LLM を呼ばないので即座に完了する。
+3. **ルール変更時の再分類** — ジャンル / ルールを追加・変更・削除する API はいずれも、コミット後にその場で全件再分類を実行し、レスポンスに `reclassified` 件数を含める（`POST /exclude-patterns` が追加時に既存記事を purge して `purged` を返すのと同じ作法）。LLM を呼ばず `tag_suggestions` を読み直すだけなので、数千件でも一瞬で終わる。再分類だけを単独で実行できるよう `POST /articles/reclassify-genres` も用意する。
 
 `tag_suggestions` が無い記事の `genre` は `NULL` のままとし、ジャンル一覧では「未分類」として扱わない（背景処理が進めば自然に埋まるため）。
 
 ## API
 
-すべて `app/routers/articles.py` に追加する。
+ジャンル定義の CRUD は新規ルータ `app/routers/genres.py`（`exclude_patterns.py` と同じ構成）に、記事側の操作は `app/routers/articles.py` に置く。
+
+### ジャンル定義の編集
+
+- `GET /genres` → `[{"id":1,"key":"ai","label_ja":"AI・LLM","priority":1,"rules":["ai","llm",...],"generic_rules":[]}]`
+  ルールを同梱して返す。管理画面が 1 リクエストで描けるようにするため。
+- `POST /genres` — body `{"key","label_ja","priority"}`。`key` 重複は 409、`key` が `"other"` の場合は 400（予約キー）。
+- `PATCH /genres/{id}` — `label_ja` / `priority` を変更。`key` は変更不可（`Article.genre` と `ArticleFilters` が参照しているため。名前を変えたい場合は作り直す）。
+- `DELETE /genres/{id}` — 紐づく `GenreRule` は DB のカスケードで消える。そのジャンルだった記事は再分類で他ジャンルか `other` に移る。
+- `POST /genre-rules` — body `{"tag","genre_id","is_generic"}`。`tag` は小文字化して保存。既に他ジャンルに割り当て済みの `tag` は 409 ではなく **付け替え**（管理画面での移動が自然に行えるため）。
+- `DELETE /genre-rules/{id}`
+
+上記の変更系はすべてレスポンスに `reclassified` 件数を含める。
 
 ### 一覧・集計
 
-- `GET /articles/genres` → `[{"genre": "ai", "unread_count": 98}, ...]`
-  `is_read == False AND is_saved == False AND dismissed_at IS NULL AND genre IS NOT NULL` を `GROUP BY genre`、件数降順。
+- `GET /articles/genres` → `[{"genre": "ai", "label_ja": "AI・LLM", "unread_count": 98}, ...]`
+  `is_read == False AND is_saved == False AND dismissed_at IS NULL AND genre IS NOT NULL` を `GROUP BY genre`、件数降順。表示名は `genres` テーブルから引く（`other` は表示名「その他」を固定で返す）。
 - `GET /articles` に `genre: str | None` クエリを追加。既存の `feed_id` などと同じく `stmt`/`count_stmt` 双方に `where` を足す。
 - `GET /articles` に `dismissed: bool = False` クエリを追加。`False` の既定時は `dismissed_at IS NULL` で絞り、`True` のときは `dismissed_at IS NOT NULL` のみを返す（Dismissed ビュー、`dismissed_at` 降順）。
 
@@ -151,20 +201,36 @@ def classify(tags: list[str]) -> str:
 
 - `types.ts` の `ArticleFilters` に `genre?: string`、`dismissed?: boolean` を追加。`Article` に `dismissed_at: string | null`。
 - `hooks/useArticles.ts` に `useGenres()`（`GET /articles/genres`）と `useDismiss()` / `useUndismiss()` を追加。ミューテーション成功時は `['articles']` `['article-genres']` `['feeds']` を invalidate する（一括操作は影響範囲が広く、既存の in-place マージ方針は適用しない）。
-- `FeedSidebar.tsx` に「ジャンル」セクションを追加。フィード一覧と同じ見た目で、ジャンル名（日本語表示名）と未読件数バッジを並べる。件数 0 のジャンルは表示しない。最下部に Dismissed ビューへの導線を置く。
+- `FeedSidebar.tsx` に「ジャンル」セクションを追加。フィード一覧と同じ見た目で、ジャンル名（`label_ja`）と未読件数バッジを並べる。件数 0 のジャンルは表示しない。最下部に Dismissed ビューへの導線を置く。
+- 同じく `FeedSidebar.tsx` に「ジャンル管理」を追加する。既存の `除外パターン管理` と同じ位置・同じモーダルの作法で、次を行えるようにする。
+  - ジャンルの追加・削除、表示名の変更、優先順位の変更（上下移動ボタンで `priority` を入れ替える）
+  - ジャンルごとのタグをチップで一覧し、削除できる
+  - タグを追加する入力欄。ジャンルを選んで `tag` を入れる。他ジャンルに割り当て済みのタグはその場で付け替わる
+  - 汎用ルール（`is_generic`）はチェックボックスで区別し、チップの見た目も変える
+  - 変更のたびにレスポンスの `reclassified` 件数をトーストなしの短いテキストで表示し、`['articles']` `['article-genres']` `['genres']` を invalidate する
+  - `other` に落ちている記事へは、この画面からワンクリックで一覧（`?genre=other`）へ飛べるようにする。辞書を育てる導線がここで閉じる
 - `ArticleList.tsx` のツールバーに、`filters.genre` が設定されているときだけ「まとめて既読」「まとめて捨てる」を出す。既存の `重複記事を整理` などと同様に、件数を含む `confirm()` を挟む。
 - Dismissed ビューでは同じ位置に「まとめて戻す」を出す。
 - 検索結果とリストのカードで `dismissed_at` が非 `NULL` の記事に「捨てた」バッジを出す（`ExtractStatusBadge` と同じ作りの小さなバッジ）。
 
 ## テスト
 
-`backend/tests/test_genre_classifier.py`（新規）:
+`backend/tests/test_genre_classifier.py`（新規、`GenreRules` を固定値で組んで純関数を検証）:
 
-- 単一タグが辞書に一致する場合、そのジャンルを返す
-- 複数ジャンルにヒットする場合、優先順位が高い方を返す（`['ai','programming']` → `ai`、`['game','soccer']` → `sports`）
-- 辞書に無いタグのみの場合、`GENERIC_FALLBACK` を経由する（`['technology']` → `dev`）
+- 単一タグがルールに一致する場合、そのジャンルを返す
+- 複数ジャンルにヒットする場合、`priority` が小さい方を返す（`['ai','programming']` → `ai`、`['game','soccer']` → `sports`）
+- 通常ルールに無く汎用ルールにある場合、汎用を経由する（`['technology']` → `dev`）
+- 通常ルールがあれば汎用ルールより優先される（`['technology','baseball']` → `sports`）
 - どこにも該当しない場合 `other` を返す（`['working-holiday','journey']`）
 - 空リストで `other` を返す
+
+`backend/tests/test_genres_api.py`（新規）:
+
+- シード後に `GET /genres` が初期辞書を返す
+- `POST /genre-rules` で既に他ジャンルにあるタグを送ると付け替わり、二重登録されない
+- ジャンル削除でそのジャンルのルールも消え、該当記事が再分類される
+- 変更系のレスポンスに `reclassified` 件数が入る
+- `key="other"` のジャンル作成が 400、`key` 重複が 409
 
 `backend/tests/test_dismiss.py`（新規）:
 
@@ -181,8 +247,11 @@ def classify(tags: list[str]) -> str:
 
 分類を先に投入して品質を見てから操作系を足す。
 
-1. 分類器 + カラム 2 本の追加（`genre` と `dismissed_at` はまとめて足す。使わないカラムがあっても無害）+ バックフィル + `GET /articles/genres`。API のレスポンスで分類結果を確認し、必要なら辞書を直して `POST /articles/reclassify-genres` で再適用する。
-2. ジャンルフィルタ + サイドバーのジャンルセクション（読むだけ）。
-3. 一括操作 + Dismissed ビュー + 各一覧からの dismissed 除外。
+1. `genres` / `genre_rules` テーブル + シード + 分類器 + `Article` のカラム 2 本（`genre` と `dismissed_at` はまとめて足す。使わないカラムがあっても無害）+ バックフィル + `GET /articles/genres`。分類結果は API のレスポンスで確認する。
+2. ジャンルフィルタ + サイドバーのジャンルセクション（読むだけ）。ここで実データの分類品質を目で見る。
+3. ジャンル定義の CRUD API + ジャンル管理 UI。辞書を直せるようにする。
+4. 一括操作 + Dismissed ビュー + 各一覧からの dismissed 除外。
+
+第 3 段階を第 4 段階より前に置くのは、**捨てる操作を入れる前に辞書を直せる状態にしておく**ため。分類が粗いまま一括 dismiss を使えるようにすると、読むべき記事をまとめて捨てる事故が起きやすい。
 
 各段階は単体でデプロイ可能で、前段が壊れていないことを確認してから次へ進む。
