@@ -129,6 +129,12 @@ class ExcludePatternOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class GenreCountOut(BaseModel):
+    genre: str
+    label_ja: str
+    unread_count: int
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):

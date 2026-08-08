@@ -80,3 +80,97 @@ async def test_seed_runs_only_once(client: AsyncClient) -> None:
         assert await seed_genres(session) == 0
         await session.commit()
         assert await session.scalar(select(func.count()).select_from(Genre)) == before
+
+
+async def _make_feed(session, url: str = "https://example.com/feed"):
+    from app.models import Feed
+
+    feed = Feed(url=url, title="Test Feed")
+    session.add(feed)
+    await session.flush()
+    return feed
+
+
+async def _make_article(session, feed_id: int, guid: str, tags: list[str] | None, **kwargs):
+    import json
+
+    from app.models import Article
+
+    article = Article(
+        feed_id=feed_id,
+        guid=guid,
+        url=f"https://example.com/{guid}",
+        title=kwargs.pop("title", "Title"),
+        tag_suggestions=json.dumps(tags) if tags is not None else None,
+        **kwargs,
+    )
+    session.add(article)
+    await session.flush()
+    return article
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_group_unread_unsaved_articles(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["llm"])
+        await _make_article(session, feed.id, "g2", ["ai", "programming"])
+        await _make_article(session, feed.id, "g3", ["baseball"])
+        await _make_article(session, feed.id, "g4", ["llm"], is_read=True)   # 既読は数えない
+        await _make_article(session, feed.id, "g5", ["llm"], is_saved=True)  # 保存済みも数えない
+        await _make_article(session, feed.id, "g6", None)                    # 未分類は出さない
+        await reclassify_all(session)
+        await session.commit()
+
+    res = await client.get("/api/articles/genres")
+    assert res.status_code == 200
+    counts = {row["genre"]: row["unread_count"] for row in res.json()}
+    assert counts["ai"] == 2
+    assert counts["sports"] == 1
+    assert "other" not in counts
+
+    labels = {row["genre"]: row["label_ja"] for row in res.json()}
+    assert labels["ai"] == "AI・LLM"
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_label_for_reserved_other(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["working-holiday"])
+        await reclassify_all(session)
+        await session.commit()
+
+    rows = res_json = (await client.get("/api/articles/genres")).json()
+    other = next(r for r in rows if r["genre"] == "other")
+    assert other["label_ja"] == "その他"
+    assert res_json
+
+
+@pytest.mark.asyncio
+async def test_reclassify_all_returns_updated_count(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.models import Article
+    from app.services.genre_classifier import reclassify_all
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["llm"])
+        await _make_article(session, feed.id, "g2", ["baseball"])
+        changed = await reclassify_all(session)
+        await session.commit()
+        assert changed == 2
+
+        genres = sorted((await session.execute(select(Article.genre))).scalars().all())
+        assert genres == ["ai", "sports"]
+
+    async with async_session() as session:
+        # 変化が無ければ 0 件（毎回 UPDATE を投げない）
+        assert await reclassify_all(session) == 0

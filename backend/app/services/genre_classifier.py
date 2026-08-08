@@ -8,7 +8,13 @@ LLM は記事をまたいだ語彙の一貫性を保てない（実測で語彙�
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Article, Genre, GenreRule
 
 # どのルールにも当たらなかった記事の受け皿。genres テーブルに行は持たない予約キー
 OTHER_GENRE = "other"
@@ -42,3 +48,57 @@ def classify(tags: list[str], rules: GenreRules) -> str:
         return _resolve(generic_hits, rules)
 
     return OTHER_GENRE
+
+
+async def load_rules(session: AsyncSession) -> GenreRules:
+    """genres / genre_rules から分類ルールのスナップショットを組み立てる。
+
+    ルール表は 150 行程度と小さいのでキャッシュは持たない。多数の記事を回す
+    ときだけ、呼び出し側がループの外で 1 回呼ぶこと。
+    """
+    rows = (
+        await session.execute(
+            select(GenreRule.tag, GenreRule.is_generic, Genre.key, Genre.priority).join(
+                Genre, GenreRule.genre_id == Genre.id
+            )
+        )
+    ).all()
+
+    tag_to_genre: dict[str, str] = {}
+    generic_to_genre: dict[str, str] = {}
+    priority: dict[str, int] = {}
+    for tag, is_generic, key, prio in rows:
+        (generic_to_genre if is_generic else tag_to_genre)[tag] = key
+        priority[key] = prio
+    return GenreRules(tag_to_genre, generic_to_genre, priority)
+
+
+def _parse_tags(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        tags = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [t for t in tags if isinstance(t, str)]
+
+
+async def reclassify_all(session: AsyncSession) -> int:
+    """tag_suggestions を持つ全記事を分類し直し、変化した件数を返す。
+
+    LLM を呼ばないので数千件でも一瞬で終わる。commit は呼び出し側が行う。
+    """
+    rules = await load_rules(session)
+    articles = (
+        await session.execute(select(Article).where(Article.tag_suggestions.isnot(None)))
+    ).scalars().all()
+
+    changed = 0
+    for article in articles:
+        genre = classify(_parse_tags(article.tag_suggestions), rules)
+        if article.genre != genre:
+            article.genre = genre
+            changed += 1
+    if changed:
+        await session.flush()
+    return changed

@@ -135,6 +135,15 @@ async def lifespan(app: FastAPI):
             await session.commit()
             logger.info("Seeded %d genres", created)
 
+    # 未分類の記事にジャンルを埋める（シードの後でなければならない）
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        filled = await reclassify_all(session)
+        if filled:
+            await session.commit()
+            logger.info("Backfilled genre for %d articles", filled)
+
     await _backfill_normalized_urls()
 
     task_queue.start()

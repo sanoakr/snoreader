@@ -16,7 +16,7 @@ _RECOMMEND_SCORE_MIN = 1.0
 
 from app.config import settings
 from app.database import get_session
-from app.models import Article, ArticleTag, Feed, Tag
+from app.models import Article, ArticleTag, Feed, Genre, Tag
 from app.schemas import (
     ArticleChatRequest,
     ArticleChatResponse,
@@ -27,6 +27,7 @@ from app.schemas import (
     DedupRequest,
     DedupResponse,
     ExtractActionRequest,
+    GenreCountOut,
     MarkAllReadRequest,
     PaginatedArticles,
     TagSuggestion,
@@ -85,6 +86,36 @@ async def list_articles(
         items.append(out)
 
     return PaginatedArticles(items=items, total=total, offset=offset, limit=limit)
+
+
+@router.get("/articles/genres", response_model=list[GenreCountOut])
+async def get_genre_counts(session: AsyncSession = Depends(get_session)):
+    """未読・未保存・未非表示の記事をジャンル別に数える。件数降順。"""
+    from app.services.genre_classifier import OTHER_GENRE
+
+    rows = (
+        await session.execute(
+            select(Article.genre, func.count().label("cnt"))
+            .where(
+                Article.is_read == False,  # noqa: E712
+                Article.is_saved == False,  # noqa: E712
+                Article.dismissed_at.is_(None),
+                Article.genre.isnot(None),
+            )
+            .group_by(Article.genre)
+            .order_by(func.count().desc())
+        )
+    ).all()
+
+    labels = {
+        key: label
+        for key, label in (await session.execute(select(Genre.key, Genre.label_ja))).all()
+    }
+    labels[OTHER_GENRE] = "その他"
+    return [
+        GenreCountOut(genre=genre, label_ja=labels.get(genre, genre), unread_count=cnt)
+        for genre, cnt in rows
+    ]
 
 
 @router.get("/articles/recommended", response_model=PaginatedArticles)
