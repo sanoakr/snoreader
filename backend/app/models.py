@@ -42,6 +42,7 @@ class Article(Base):
         Index("idx_articles_is_read", "is_read"),
         Index("idx_articles_is_saved", "is_saved"),
         Index("idx_articles_normalized_url", "normalized_url"),
+        Index("idx_articles_genre", "genre"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -68,9 +69,46 @@ class Article(Base):
     # "not_found" (404) / "forbidden" (403) / "error" (5xx/timeout/net) / "skipped"
     extract_status: Mapped[str | None] = mapped_column(String, nullable=True)
     extract_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # タグ候補から決めたジャンル（genre_classifier）。null = 未分類
+    genre: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 一覧から外した日時。is_read は変えないので article_cleanup の削除対象にならない
+    dismissed_at: Mapped[str | None] = mapped_column(String, nullable=True)
 
     feed: Mapped["Feed"] = relationship(back_populates="articles")
     tags: Mapped[list["Tag"]] = relationship(secondary="article_tags", back_populates="articles")
+
+
+class Genre(Base):
+    """記事のジャンル定義。粒度は運用しながら変えるため DB に持つ。"""
+
+    __tablename__ = "genres"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label_ja: Mapped[str] = mapped_column(String, nullable=False)
+    # 小さいほど優先。タグが複数ジャンルにヒットしたときの解決順
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[str] = mapped_column(String, default=_utcnow)
+
+    rules: Mapped[list["GenreRule"]] = relationship(
+        back_populates="genre", cascade="all, delete-orphan"
+    )
+
+
+class GenreRule(Base):
+    """タグ候補 1 語 → ジャンルの割り当て。"""
+
+    __tablename__ = "genre_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tag: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    genre_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("genres.id", ondelete="CASCADE"), nullable=False
+    )
+    # True のルールは、通常ルールが 1 つも当たらなかったときだけ使う
+    is_generic: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    genre: Mapped["Genre"] = relationship(back_populates="rules")
 
 
 class Tag(Base):

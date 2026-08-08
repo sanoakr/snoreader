@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from app.services.background_processor import start as start_bg_processor
 from app.services.background_processor import stop as stop_bg_processor
 from app.services.deduplicator import normalize_url
 from app.services.scheduler import start_scheduler, stop_scheduler
+
+logger = logging.getLogger(__name__)
 
 # trigram トークナイザは CJK の部分一致検索に対応する（unicode61 では空白で
 # 区切られない日本語が 1 トークン化されてしまい部分一致できない）
@@ -89,6 +92,13 @@ async def lifespan(app: FastAPI):
                 "ON articles(normalized_url)"
             )
         )
+        if "genre" not in existing_article_cols:
+            await conn.execute(text("ALTER TABLE articles ADD COLUMN genre TEXT"))
+        if "dismissed_at" not in existing_article_cols:
+            await conn.execute(text("ALTER TABLE articles ADD COLUMN dismissed_at TEXT"))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_articles_genre ON articles(genre)")
+        )
 
         # 既存 FTS テーブルが古いトークナイザのまま残っていれば作り直す
         existing = await conn.execute(
@@ -113,6 +123,17 @@ async def lifespan(app: FastAPI):
             await conn.execute(
                 text("INSERT INTO articles_fts(articles_fts) VALUES('rebuild')")
             )
+
+    # ジャンル定義のシードは genre のバックフィルより必ず先に実行する。
+    # 逆順だと空のルールで全件が genre="other" に確定し、
+    # 「genre IS NULL」を条件とする以後のバックフィルで二度と拾えなくなる
+    from app.services.genre_seed import seed_genres
+
+    async with async_session() as session:
+        created = await seed_genres(session)
+        if created:
+            await session.commit()
+            logger.info("Seeded %d genres", created)
 
     await _backfill_normalized_urls()
 
