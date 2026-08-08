@@ -109,7 +109,7 @@ export function getGenreCounts(): Promise<GenreCount[]> {
   return fetchJSON(`${BASE}/articles/genres`);
 }
 
-export function dismissArticles(body: { genre?: string; ids?: number[] }): Promise<{ dismissed: number }> {
+export function dismissArticles(body: { genre?: string; ids?: number[] }): Promise<{ dismissed: number; ids: number[] }> {
   return fetchJSON(`${BASE}/articles/dismiss`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

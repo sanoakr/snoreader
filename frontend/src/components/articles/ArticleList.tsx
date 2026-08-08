@@ -121,8 +121,10 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   const bulkDeleteTags = useBulkDeleteTags();
   const { data: genreCounts } = useGenreCounts();
   // 一括操作の直後に「N 件を非表示にしました [元に戻す]」を出すための状態。
+  // Undo は「直前の操作」だけを取り消すべきなので、genre 再指定ではなく
+  // API が返した対象 ids で戻す（そのジャンルの他の非表示記事を巻き込まないため）。
   // フィルタ変更時にクリアする（下の useEffect）
-  const [lastDismissed, setLastDismissed] = useState<{ genre: string; count: number } | null>(null);
+  const [lastDismissed, setLastDismissed] = useState<{ ids: number[]; count: number } | null>(null);
 
   const selectedTag = filters.tag_id != null ? tags?.find(t => t.id === filters.tag_id) : null;
   // 一括操作ボタンの確認件数・表示名は、現在のビューの total ではなく
@@ -559,7 +561,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                   onClick={() => {
                     if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件を非表示にしますか？\n削除はされません。「非表示にした記事」から戻せます。`)) return;
                     dismiss.mutate({ genre: filters.genre }, {
-                      onSuccess: (r) => setLastDismissed({ genre: filters.genre!, count: r.dismissed }),
+                      onSuccess: (r) => setLastDismissed({ ids: r.ids, count: r.dismissed }),
                     });
                   }}
                   className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40"
@@ -570,12 +572,14 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
             )}
             {filters.dismissed && total > 0 && (
               <button
+                disabled={isSearching}
+                title={isSearching ? '検索中は使えません（検索結果には非表示以外の記事も混ざります）' : undefined}
                 onClick={() => {
                   const ids = displayArticles.map(a => a.id);
                   if (!confirm(`表示中の ${ids.length} 件を元に戻しますか？`)) return;
                   undismiss.mutate({ ids });
                 }}
-                className="text-xs text-blue-500 hover:text-blue-700"
+                className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-40"
               >
                 まとめて戻す
               </button>
@@ -586,7 +590,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
               <span>{lastDismissed.count} 件を非表示にしました</span>
               <button
                 onClick={() => {
-                  undismiss.mutate({ genre: lastDismissed.genre });
+                  undismiss.mutate({ ids: lastDismissed.ids });
                   setLastDismissed(null);
                 }}
                 className="text-blue-500 hover:text-blue-700"

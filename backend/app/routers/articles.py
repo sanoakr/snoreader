@@ -617,7 +617,8 @@ async def dismiss_articles(
     for article in articles:
         article.dismissed_at = now
     await session.commit()
-    return {"dismissed": len(articles)}
+    # Undo (undismiss) がこの操作だけを取り消せるよう、対象 id を返す
+    return {"dismissed": len(articles), "ids": [a.id for a in articles]}
 
 
 @router.post("/articles/undismiss", response_model=dict)

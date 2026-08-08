@@ -81,9 +81,21 @@ async def _seed_articles(client: AsyncClient) -> None:
 async def test_dismiss_by_genre_hides_only_that_genre(client: AsyncClient) -> None:
     await _seed_articles(client)
 
+    from app.database import async_session
+    from app.models import Article
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        rows = (await session.execute(select(Article.id, Article.title))).all()
+    id_by_title = {title: id_ for id_, title in rows}
+
     res = await client.post("/api/articles/dismiss", json={"genre": "sports"})
     assert res.status_code == 200
-    assert res.json()["dismissed"] == 2  # 保存済みは対象外
+    body = res.json()
+    assert body["dismissed"] == 2  # 保存済みは対象外
+    # Undo（フロントの一括操作）がこの操作だけを取り消せるよう、対象 id が
+    # 実際に非表示にした記事（野球1・サッカー1）と一致することを検証する
+    assert set(body["ids"]) == {id_by_title["野球1"], id_by_title["サッカー1"]}
 
     listed = (await client.get("/api/articles")).json()
     titles = {item["title"] for item in listed["items"]}
