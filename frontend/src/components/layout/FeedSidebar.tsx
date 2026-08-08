@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles, useDedupArticles } from '../../hooks/useFeeds';
-import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed } from '../../hooks/useArticles';
+import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed, useGenreCounts } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { useExcludePatterns, useCreateExcludePattern, useDeleteExcludePattern } from '../../hooks/useExcludePatterns';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
+import { GenreManagerModal } from './GenreManagerModal';
 import type { ArticleFilters } from '../../types';
 
 interface Props {
@@ -39,6 +40,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const [editingTagName, setEditingTagName] = useState('');
   const [excludeManageMode, setExcludeManageMode] = useState(false);
   const [newExcludePattern, setNewExcludePattern] = useState('');
+  const [showGenreManager, setShowGenreManager] = useState(false);
   const opmlFileRef = useRef<HTMLInputElement>(null);
   const articlesFileRef = useRef<HTMLInputElement>(null);
 
@@ -49,6 +51,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const { data: aiStatus } = useAiStatus();
   const { data: extractFailed } = useExtractFailed();
   const extractFailedCount = extractFailed?.length ?? 0;
+  const { data: genreCounts } = useGenreCounts();
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -280,6 +283,45 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
+        {/* ジャンル別ナビゲーション。件数 0 のジャンルは API が返さないのでそのまま並べる */}
+        {genreCounts && genreCounts.length > 0 && (
+          <div className="mt-4">
+            <div className="px-2 mb-1 text-xs font-semibold text-gray-400">ジャンル</div>
+            {genreCounts.map((g) => (
+              <button
+                key={g.genre}
+                onClick={() => onFilterChange({
+                  ...filters, genre: g.genre, dismissed: undefined,
+                  feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined,
+                  recommended: undefined, unrecommended: undefined, extract_failed: undefined,
+                })}
+                className={`w-full flex items-center gap-2 px-2 py-1 text-sm text-left rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                  filters.genre === g.genre ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+                }`}
+              >
+                <span className="truncate flex-1">{g.label_ja}</span>
+                <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">
+                  {g.unread_count}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 非表示にした記事（ジャンルで束にした未読を「後回し」にした記事）の一覧 */}
+        <button
+          onClick={() => onFilterChange({
+            ...filters, dismissed: true, genre: undefined,
+            feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined,
+            recommended: undefined, unrecommended: undefined, extract_failed: undefined,
+          })}
+          className={`w-full px-2 py-1 text-sm text-left rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
+            filters.dismissed ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+          }`}
+        >
+          非表示にした記事
+        </button>
+
         {/* Feed list */}
         {isLoading && <div className="flex justify-center py-3"><Spinner size="sm" /></div>}
         {feeds?.map((feed) => (
@@ -464,6 +506,21 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                   <p className="text-xs text-red-500">{(createExcludePattern.error as Error).message}</p>
                 )}
               </div>
+            )}
+            <button
+              onClick={() => setShowGenreManager(m => !m)}
+              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
+              title="どのタグをどのジャンルに割り当てるか、ジャンルの優先順位を編集する"
+            >
+              {showGenreManager ? 'ジャンル管理を閉じる' : 'ジャンル管理'}
+            </button>
+            {showGenreManager && (
+              <GenreManagerModal
+                onNavigateToOther={() => {
+                  setShowGenreManager(false);
+                  onFilterChange({ ...filters, genre: 'other', dismissed: undefined });
+                }}
+              />
             )}
           </>
         )}
