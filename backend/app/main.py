@@ -120,9 +120,9 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     start_bg_processor()
     yield
-    stop_bg_processor()
+    await stop_bg_processor()
     stop_scheduler()
-    task_queue.stop()
+    await task_queue.stop()
 
 
 app = FastAPI(title="SnoReader", version="0.1.0", lifespan=lifespan)

@@ -60,6 +60,10 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
+    # 次のテストで新しい engine が作られる前に、この engine の aiosqlite
+    # 接続・バックグラウンドスレッドを確実に破棄する（テスト分離のため）。
+    await database_module.engine.dispose()
+
 
 async def _make_feed(session, url: str, title: str = ""):
     from app.models import Feed

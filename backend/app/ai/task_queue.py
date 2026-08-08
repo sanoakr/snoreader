@@ -26,6 +26,7 @@ PRIORITY_BACKGROUND = 10
 
 Lane = Literal["bulk", "reserved"]
 _LANE_WORKERS: dict[Lane, int] = {"bulk": 2, "reserved": 1}
+_STOP_TIMEOUT = 5.0  # ワーカー停止を待つ上限秒数（無期限に待たない）
 
 T = TypeVar("T")
 
@@ -62,7 +63,13 @@ async def _worker(lane: Lane) -> None:
 
 
 def start() -> None:
-    global _worker_tasks
+    # start() 呼び出しごとにキューを新しく作り直す。asyncio.PriorityQueue は
+    # 最初に get()/put() されたイベントループに紐付いてしまうため、キューを
+    # 使い回すと（テストで importlib.reload するたびに新しいイベントループが
+    # 使われるケースなど）2 回目以降の start() で
+    # "PriorityQueue is bound to a different event loop" になる。
+    global _worker_tasks, _queues
+    _queues = {lane: asyncio.PriorityQueue() for lane in _LANE_WORKERS}
     loop = asyncio.get_event_loop()
     _worker_tasks = [
         loop.create_task(_worker(lane), name=f"llm-worker-{lane}-{i}")
@@ -72,10 +79,21 @@ def start() -> None:
     logger.info("LLM task queue workers started: %s", _LANE_WORKERS)
 
 
-def stop() -> None:
-    for task in _worker_tasks:
-        if not task.done():
-            task.cancel()
+async def stop() -> None:
+    global _worker_tasks
+    tasks = [task for task in _worker_tasks if not task.done()]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=_STOP_TIMEOUT
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "LLM task queue workers did not stop within %.1fs", _STOP_TIMEOUT
+            )
+    _worker_tasks = []
     logger.info("LLM task queue workers stopped")
 
 

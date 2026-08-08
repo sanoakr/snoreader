@@ -24,6 +24,7 @@ _SLEEP_IDLE = 10
 _SKIP_DURATION = 300  # seconds to skip an article after failure
 _SHORT_CONTENT_THRESHOLD = 100  # summary shorter than this triggers auto-extraction
 _PHASE1_WORKERS = 2  # matches task_queue's "bulk" lane worker count
+_STOP_TIMEOUT = 5.0  # 停止を待つ上限秒数（無期限に待たない）
 
 _processor_tasks: list[asyncio.Task[None]] = []
 # Phase 0 (本文抽出) と Phase 1/2 (LLM) の skip 辞書を分離する。
@@ -300,10 +301,21 @@ def start() -> None:
     logger.info("Background AI processor started (%d tasks)", len(_processor_tasks))
 
 
-def stop() -> None:
-    for task in _processor_tasks:
-        if not task.done():
-            task.cancel()
+async def stop() -> None:
+    global _processor_tasks
+    tasks = [task for task in _processor_tasks if not task.done()]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=_STOP_TIMEOUT
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "Background AI processor did not stop within %.1fs", _STOP_TIMEOUT
+            )
+    _processor_tasks = []
     logger.info("Background AI processor stopped")
 
 
