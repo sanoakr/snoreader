@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.genre_classifier import GenreRules, _parse_tags, classify
+from app.services.genre_classifier import GenreRules, classify, parse_tags
 
 
 @pytest.fixture
@@ -72,44 +72,44 @@ def test_generic_rules_also_resolve_by_priority():
     assert classify(["technology", "news"], multi) == "dev"
 
 
-# --- _parse_tags: 構文としては妥当だが list ではない JSON を安全に弾くこと ---
+# --- parse_tags: 構文としては妥当だが list ではない JSON を安全に弾くこと ---
 # (tag_suggestions に null / スカラー / dict が入っていてもアプリ起動を落とさない)
 
 
 def test_parse_tags_none_returns_empty():
-    assert _parse_tags(None) == []
+    assert parse_tags(None) == []
 
 
 def test_parse_tags_empty_string_returns_empty():
-    assert _parse_tags("") == []
+    assert parse_tags("") == []
 
 
 def test_parse_tags_json_null_returns_empty():
-    assert _parse_tags("null") == []
+    assert parse_tags("null") == []
 
 
 def test_parse_tags_json_scalar_returns_empty():
-    assert _parse_tags("42") == []
-    assert _parse_tags('"just a string"') == []
+    assert parse_tags("42") == []
+    assert parse_tags('"just a string"') == []
 
 
 def test_parse_tags_json_dict_returns_empty():
-    assert _parse_tags('{"a": 1}') == []
+    assert parse_tags('{"a": 1}') == []
 
 
 def test_parse_tags_malformed_json_returns_empty():
-    assert _parse_tags("{not valid json") == []
+    assert parse_tags("{not valid json") == []
 
 
 def test_parse_tags_valid_list_passes_through():
-    assert _parse_tags('["llm", "ai"]') == ["llm", "ai"]
+    assert parse_tags('["llm", "ai"]') == ["llm", "ai"]
 
 
 def test_parse_tags_list_with_non_string_items_filters_them():
-    assert _parse_tags('["llm", 1, null, "ai"]') == ["llm", "ai"]
+    assert parse_tags('["llm", 1, null, "ai"]') == ["llm", "ai"]
 
 
 def test_classify_via_malformed_tag_suggestions_falls_back_to_other(rules: GenreRules):
     """DB から取った tag_suggestions が list でない場合も other に落ちること（reclassify_all 相当の経路）。"""
     for raw in ("null", "42", '{"a": 1}', "{not valid json"):
-        assert classify(_parse_tags(raw), rules) == "other"
+        assert classify(parse_tags(raw), rules) == "other"

@@ -73,7 +73,7 @@ async def load_rules(session: AsyncSession) -> GenreRules:
     return GenreRules(tag_to_genre, generic_to_genre, priority)
 
 
-def _parse_tags(raw: str | None) -> list[str]:
+def parse_tags(raw: str | None) -> list[str]:
     if not raw:
         return []
     try:
@@ -98,7 +98,7 @@ async def reclassify_all(session: AsyncSession) -> int:
 
     changed = 0
     for article in articles:
-        genre = classify(_parse_tags(article.tag_suggestions), rules)
+        genre = classify(parse_tags(article.tag_suggestions), rules)
         if article.genre != genre:
             article.genre = genre
             changed += 1

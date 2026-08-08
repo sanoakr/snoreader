@@ -122,9 +122,9 @@ async def _merge_into_keeper(
             setattr(keeper, field, getattr(loser, field))
 
     # tag_suggestions が loser 由来に差し替わることがあるので、ジャンルは計算し直す
-    from app.services.genre_classifier import _parse_tags, classify
+    from app.services.genre_classifier import classify, parse_tags
 
-    keeper.genre = classify(_parse_tags(keeper.tag_suggestions), rules)
+    keeper.genre = classify(parse_tags(keeper.tag_suggestions), rules)
 
     loser_assocs = (
         await session.execute(select(ArticleTag).where(ArticleTag.article_id == loser.id))
