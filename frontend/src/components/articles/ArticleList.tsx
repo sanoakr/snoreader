@@ -545,7 +545,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
             {filters.genre && !filters.dismissed && (
               <>
                 <button
-                  disabled={isSearching || dismiss.isPending}
+                  disabled={isSearching || dismiss.isPending || markAllRead.isPending}
                   title={isSearching ? '検索中は使えません（検索の絞り込みは一括操作に反映されません）' : 'このジャンルの未読をまとめて既読にする'}
                   onClick={() => {
                     if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件をまとめて既読にしますか？`)) return;
@@ -556,7 +556,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                   まとめて既読
                 </button>
                 <button
-                  disabled={isSearching || dismiss.isPending}
+                  disabled={isSearching || dismiss.isPending || markAllRead.isPending}
                   title={isSearching ? '検索中は使えません（検索の絞り込みは一括操作に反映されません）' : 'このジャンルの未読を一覧から外す（削除はされません）'}
                   onClick={() => {
                     if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件を非表示にしますか？\n削除はされません。「非表示にした記事」から戻せます。`)) return;

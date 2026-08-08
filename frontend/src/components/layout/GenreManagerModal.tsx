@@ -49,6 +49,9 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
             <input
               defaultValue={g.label_ja}
               onBlur={(e) => {
+                // 再分類（最大 10 秒）が進行中は古い g.label_ja からの差分判定で
+                // 二重にミューテーションを飛ばさないようガードする
+                if (updateGenre.isPending) return;
                 const v = e.target.value.trim();
                 if (v && v !== g.label_ja) {
                   updateGenre.mutate(
@@ -68,7 +71,8 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
                   { onSuccess: (res) => setLastReclassified(res.reclassified) },
                 )
               }
-              className="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600"
+              disabled={updateGenre.isPending}
+              className="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50"
               title="優先順位を上げる（複数ジャンルに当たったとき勝ちやすくなる）"
             >
               ↑
@@ -80,7 +84,8 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
                   { onSuccess: (res) => setLastReclassified(res.reclassified) },
                 )
               }
-              className="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600"
+              disabled={updateGenre.isPending}
+              className="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 disabled:opacity-50"
               title="優先順位を下げる"
             >
               ↓
@@ -98,7 +103,8 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
                   },
                 });
               }}
-              className="text-xs px-1.5 py-0.5 rounded border border-red-300 text-red-600 dark:border-red-700 dark:text-red-400"
+              disabled={deleteGenre.isPending}
+              className="text-xs px-1.5 py-0.5 rounded border border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 disabled:opacity-50"
             >
               削除
             </button>
