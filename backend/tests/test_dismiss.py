@@ -102,6 +102,57 @@ async def test_dismiss_by_genre_hides_only_that_genre(client: AsyncClient) -> No
     assert titles == {"AI1", "保存野球"}
 
 
+async def _seed_articles_with_read(client: AsyncClient) -> None:
+    """_seed_articles に加えて、既読の sports 記事を 1 件混ぜる。
+
+    C2 回帰テスト用: genre 指定の一括操作は確認ダイアログの unread_count と
+    実処理件数を一致させるため未読限定でなければならないが、既読記事が
+    混ざっていても素通りしないことを確認するにはこの 1 件が必要。
+    """
+    from app.database import async_session
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["baseball"], title="野球1")
+        await _make_article(session, feed.id, "g2", ["soccer"], title="サッカー1")
+        await _make_article(session, feed.id, "g3", ["llm"], title="AI1")
+        await _make_article(session, feed.id, "g4", ["baseball"], title="保存野球", is_saved=True)
+        await _make_article(session, feed.id, "g5", ["baseball"], title="既読野球", is_read=True)
+        await reclassify_all(session)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_dismiss_by_genre_excludes_already_read_articles(client: AsyncClient) -> None:
+    """genre 指定の dismiss は既読記事を対象にしない。
+
+    確認ダイアログは「未読 N 件」の unread_count を見せているため、実処理が
+    is_read を見ずに genre だけで絞ると確認件数と実処理件数がずれる
+    （本番実測: 確認 90 件 → 実処理 2917 件）。
+    """
+    await _seed_articles_with_read(client)
+
+    from app.database import async_session
+    from app.models import Article
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        rows = (await session.execute(select(Article.id, Article.title))).all()
+    id_by_title = {title: id_ for id_, title in rows}
+
+    res = await client.post("/api/articles/dismiss", json={"genre": "sports"})
+    assert res.status_code == 200
+    body = res.json()
+    # 野球1・サッカー1（未読）のみ。既読野球・保存野球は対象外
+    assert body["dismissed"] == 2
+    assert set(body["ids"]) == {id_by_title["野球1"], id_by_title["サッカー1"]}
+
+    async with async_session() as session:
+        read_article = await session.get(Article, id_by_title["既読野球"])
+        assert read_article.dismissed_at is None
+
+
 @pytest.mark.asyncio
 async def test_dismiss_protects_saved_articles_by_ids(client: AsyncClient) -> None:
     from app.database import async_session

@@ -190,9 +190,9 @@ entertainment 37 (6%)  sports 21 (3%)  security 20 (3%)
 
 ### 一括操作
 
-- `POST /articles/dismiss` — body `{"genre": "sports"}` または `{"ids": [1,2,3]}`。`genre` 指定・`ids` 指定のどちらでも対象は `is_saved == False AND dismissed_at IS NULL` の記事に限る（保存済みは常に保護。`ids` に保存済みが含まれていても無視して件数に数えない）。`dismissed_at` に現在時刻を入れ、`{"dismissed": <件数>}` を返す。
+- `POST /articles/dismiss` — body `{"genre": "sports"}` または `{"ids": [1,2,3]}`。`genre` 指定・`ids` 指定のどちらでも対象は `is_saved == False AND dismissed_at IS NULL` の記事に限る（保存済みは常に保護。`ids` に保存済みが含まれていても無視して件数に数えない）。**`genre` 指定時はさらに `is_read == False` も条件に加える**（UI の確認ダイアログは `GET /articles/genres` の `unread_count` を見せているため、実処理も未読限定にしないと確認件数と実処理件数がずれる）。`ids` 指定は明示的な選択なので `is_read` は問わない。`dismissed_at` に現在時刻を入れ、`{"dismissed": <件数>}` を返す。
 - `POST /articles/undismiss` — 同じ body 形式。対象は `dismissed_at IS NOT NULL` の記事。`dismissed_at` を `NULL` に戻し、`{"restored": <件数>}` を返す。
-- 一括既読は既存の `POST /articles/mark-all-read` に `genre` パラメータを追加して賄う（新規エンドポイントを作らない）。`genre` 指定時の対象からは dismissed 記事を除き、**`is_saved == False` も条件に加える**。既存の `mark_all_read`（`articles.py:513`）は `is_read == False` だけで絞っており保存済み未読も既読化してしまうが、一括 dismiss が保存済みを保護する以上、genre 一括だけ保護しないのは非対称で事故のもとになる。全体・フィード指定時の既存挙動は後方互換のため変更しない（変えるなら別件）。
+- 一括既読は既存の `POST /articles/mark-all-read` に `genre` パラメータを追加して賄う（新規エンドポイントを作らない）。`genre` 指定時の対象からは dismissed 記事を除き、**`is_saved == False` も条件に加える**。既存の `mark_all_read`（`articles.py:513`）は `is_read == False` だけで絞っており保存済み未読も既読化してしまうが、一括 dismiss が保存済みを保護する以上、genre 一括だけ保護しないのは非対称で事故のもとになる。全体・フィード指定時の既存挙動も `dismissed_at IS NULL` を条件に加える（非表示記事を開くだけで既読化され自動削除の保護が外れる事故を防ぐため。既読化そのものの挙動は変えない）。
 
 `genre` と `ids` の両方が空の body は 422 を返す。両方指定された場合は `ids` を優先する。
 

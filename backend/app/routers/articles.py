@@ -597,6 +597,10 @@ def _dismiss_targets(body: DismissRequest, *, restoring: bool):
         conds.append(Article.id.in_(body.ids))
     elif body.genre:
         conds.append(Article.genre == body.genre)
+        if not restoring:
+            # UI の確認ダイアログは「未読 N 件」の unread_count を見せているので、
+            # 実処理も未読に限定しないと確認件数と実処理件数がずれる（既読混入で桁違いになる）
+            conds.append(Article.is_read == False)  # noqa: E712
     if restoring:
         conds.append(Article.dismissed_at.isnot(None))
     else:
