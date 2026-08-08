@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAiStatus, useArticles, useExtractAction, useExtractFailed, useMarkAllRead, useSearchArticles, useUpdateArticle } from '../../hooks/useArticles';
+import { useAiStatus, useArticles, useDismiss, useExtractAction, useExtractFailed, useGenreCounts, useMarkAllRead, useSearchArticles, useUndismiss, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
 import { useRefreshFeed } from '../../hooks/useFeeds';
 import type { Article, ArticleFilters } from '../../types';
@@ -33,6 +33,15 @@ function ExtractStatusBadge({ status }: { status: string | null | undefined }) {
   const label = EXTRACT_STATUS_LABEL[status] ?? status;
   const color = EXTRACT_STATUS_COLOR[status] ?? EXTRACT_STATUS_COLOR.error;
   return <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${color}`}>{label}</span>;
+}
+
+function DismissedBadge({ dismissedAt }: { dismissedAt: string | null | undefined }) {
+  if (!dismissedAt) return null;
+  return (
+    <span className="text-xs px-1.5 py-0.5 rounded font-mono bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+      非表示
+    </span>
+  );
 }
 
 interface Props {
@@ -103,13 +112,25 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
 
   const searchResults = useSearchArticles(searchQuery, { feed_id: filters.feed_id, is_saved: filters.is_saved });
   const markAllRead = useMarkAllRead();
+  const dismiss = useDismiss();
+  const undismiss = useUndismiss();
   const updateArticle = useUpdateArticle();
   const { data: aiStatus } = useAiStatus();
   const aiAvailable = aiStatus?.available ?? false;
   const { data: tags } = useTags();
   const bulkDeleteTags = useBulkDeleteTags();
+  const { data: genreCounts } = useGenreCounts();
+  // 一括操作の直後に「N 件を非表示にしました [元に戻す]」を出すための状態。
+  // フィルタ変更時にクリアする（下の useEffect）
+  const [lastDismissed, setLastDismissed] = useState<{ genre: string; count: number } | null>(null);
 
   const selectedTag = filters.tag_id != null ? tags?.find(t => t.id === filters.tag_id) : null;
+  // 一括操作ボタンの確認件数・表示名は、現在のビューの total ではなく
+  // 「そのジャンルの未読件数」（= mark-all-read / dismiss が実際に処理する件数）から取る。
+  // total は is_read タブ（Unread/All/Read）次第で変わってしまい、一致しない。
+  const genreCountEntry = filters.genre ? genreCounts?.find(g => g.genre === filters.genre) : undefined;
+  const genreLabel = genreCountEntry?.label_ja ?? filters.genre ?? '';
+  const genreUnreadCount = genreCountEntry?.unread_count ?? 0;
 
   const isSearching = searchQuery.length > 0;
   const isLoading = isExtractFailedView
@@ -153,6 +174,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     listRef.current?.scrollTo(0, 0);
     pinnedArticleRef.current = null;
     setSelectedId(null);
+    setLastDismissed(null);
   }, [filters, searchQuery]);
 
   // Report current view total to the parent (used by the mobile header)
@@ -513,12 +535,66 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
               >
                 #{selectedTag.name} を削除
               </button>
-            ) : !filters.is_saved && (
-              <button onClick={() => markAllRead.mutate(filters.feed_id)} disabled={markAllRead.isPending} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">
+            ) : !filters.is_saved && !filters.genre && !filters.dismissed && (
+              <button onClick={() => markAllRead.mutate({ feed_id: filters.feed_id })} disabled={markAllRead.isPending} className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50">
                 Mark all read
               </button>
             )}
+            {filters.genre && !filters.dismissed && (
+              <>
+                <button
+                  disabled={isSearching || dismiss.isPending}
+                  title={isSearching ? '検索中は使えません（検索の絞り込みは一括操作に反映されません）' : 'このジャンルの未読をまとめて既読にする'}
+                  onClick={() => {
+                    if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件をまとめて既読にしますか？`)) return;
+                    markAllRead.mutate({ genre: filters.genre });
+                  }}
+                  className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-40"
+                >
+                  まとめて既読
+                </button>
+                <button
+                  disabled={isSearching || dismiss.isPending}
+                  title={isSearching ? '検索中は使えません（検索の絞り込みは一括操作に反映されません）' : 'このジャンルの未読を一覧から外す（削除はされません）'}
+                  onClick={() => {
+                    if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件を非表示にしますか？\n削除はされません。「非表示にした記事」から戻せます。`)) return;
+                    dismiss.mutate({ genre: filters.genre }, {
+                      onSuccess: (r) => setLastDismissed({ genre: filters.genre!, count: r.dismissed }),
+                    });
+                  }}
+                  className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                >
+                  まとめて非表示
+                </button>
+              </>
+            )}
+            {filters.dismissed && total > 0 && (
+              <button
+                onClick={() => {
+                  const ids = displayArticles.map(a => a.id);
+                  if (!confirm(`表示中の ${ids.length} 件を元に戻しますか？`)) return;
+                  undismiss.mutate({ ids });
+                }}
+                className="text-xs text-blue-500 hover:text-blue-700"
+              >
+                まとめて戻す
+              </button>
+            )}
           </div>
+          {lastDismissed && (
+            <div className="px-2 py-1 flex items-center gap-2 text-xs bg-gray-100 dark:bg-gray-800 rounded">
+              <span>{lastDismissed.count} 件を非表示にしました</span>
+              <button
+                onClick={() => {
+                  undismiss.mutate({ genre: lastDismissed.genre });
+                  setLastDismissed(null);
+                }}
+                className="text-blue-500 hover:text-blue-700"
+              >
+                元に戻す
+              </button>
+            </div>
+          )}
           {/* Tag filter chips — only in Saved view. Toggles tag_id/untagged while preserving is_saved. */}
           {filters.is_saved && (
             <div className="flex flex-wrap gap-1">
@@ -624,6 +700,11 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                   >
                     削除
                   </button>
+                </div>
+              )}
+              {article.dismissed_at && (
+                <div className="px-3 pb-1 -mt-1">
+                  <DismissedBadge dismissedAt={article.dismissed_at} />
                 </div>
               )}
             </div>

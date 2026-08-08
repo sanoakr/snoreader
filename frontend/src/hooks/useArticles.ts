@@ -54,12 +54,13 @@ export function useUpdateArticle() {
 export function useMarkAllRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (feedId?: number) => api.markAllRead(feedId),
+    mutationFn: (body: { feed_id?: number; genre?: string } = {}) => api.markAllRead(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['feeds'] });
       qc.invalidateQueries({ queryKey: ['recommended-count'] });
       qc.invalidateQueries({ queryKey: ['unrecommended-count'] });
+      qc.invalidateQueries({ queryKey: ['genre-counts'] });
     },
   });
 }

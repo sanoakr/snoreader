@@ -83,11 +83,11 @@ export function updateArticle(id: number, data: { is_read?: boolean; is_saved?: 
   });
 }
 
-export function markAllRead(feedId?: number): Promise<{ marked: number }> {
+export function markAllRead(body: { feed_id?: number; genre?: string } = {}): Promise<{ marked: number }> {
   return fetchJSON(`${BASE}/articles/mark-all-read`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ feed_id: feedId ?? null }),
+    body: JSON.stringify(body),
   });
 }
 
