@@ -148,6 +148,8 @@ class GenreOut(BaseModel):
     # 管理 UI がチップの削除に rule id を使うので、タグ名だけでなく id も返す
     rules: list[GenreRuleOut] = []
     generic_rules: list[GenreRuleOut] = []
+    # 変更系エンドポイントは全件再分類した件数をここに詰める（作成直後は 0）
+    reclassified: int = 0
 
 
 class GenreCreate(BaseModel):

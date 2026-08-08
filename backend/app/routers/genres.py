@@ -84,8 +84,14 @@ async def create_genre(body: GenreCreate, session: AsyncSession = Depends(get_se
     session.add(genre)
     await session.commit()
     await session.refresh(genre)
+    # 新規ジャンルにはまだルールが無いので実質 0 件だが、変更系レスポンスの契約は揃える
+    changed = await _reclassify(session)
     return GenreOut(
-        id=genre.id, key=genre.key, label_ja=genre.label_ja, priority=genre.priority
+        id=genre.id,
+        key=genre.key,
+        label_ja=genre.label_ja,
+        priority=genre.priority,
+        reclassified=changed,
     )
 
 
@@ -102,8 +108,10 @@ async def update_genre(
         genre.priority = body.priority
     await session.commit()
     # priority を変えると解決順が変わるので再分類する
-    await _reclassify(session)
-    return next(g for g in await _list_genres(session) if g.id == genre_id)
+    changed = await _reclassify(session)
+    out = next(g for g in await _list_genres(session) if g.id == genre_id)
+    out.reclassified = changed
+    return out
 
 
 @router.delete("/genres/{genre_id}", response_model=ReclassifyResult)
