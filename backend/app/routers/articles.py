@@ -510,6 +510,10 @@ async def update_article(
         newly_saved = body.is_saved and not article.is_saved
         article.is_saved = body.is_saved
         article.saved_at = now if body.is_saved else None
+        if newly_saved:
+            # 非表示ビューや検索から「これは残す」と保存する救出動線を塞がないよう、
+            # 非表示を解除する。解除しないと Saved ビュー/カウントに出てこなくなる。
+            article.dismissed_at = None
 
     # 新規 Saved 化 + 未タグ付け + auto_tag 許可 → 既存タグで自動マッチ
     if newly_saved and body.auto_tag:

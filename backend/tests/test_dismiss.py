@@ -227,6 +227,36 @@ async def test_dismiss_requires_genre_or_ids(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_saving_dismissed_article_clears_dismissed_at(client: AsyncClient) -> None:
+    """非表示記事を保存すると dismissed_at が解除され、Saved ビューに出てくること。
+
+    非表示ビューや検索で拾った記事を「これは残す」と保存する救出動線で、
+    保存済みなのに Saved ビュー/カウントに出てこない記事を作らないための回帰テスト。
+    """
+    await _seed_articles(client)
+    await client.post("/api/articles/dismiss", json={"genre": "sports"})
+
+    from app.database import async_session
+    from app.models import Article
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        dismissed_id = (
+            await session.execute(
+                select(Article.id).where(Article.dismissed_at.isnot(None))
+            )
+        ).scalars().first()
+    assert dismissed_id is not None
+
+    res = await client.patch(f"/api/articles/{dismissed_id}", json={"is_saved": True})
+    assert res.status_code == 200
+    assert res.json()["dismissed_at"] is None
+
+    saved = (await client.get("/api/articles", params={"is_saved": "true"})).json()
+    assert dismissed_id in {item["id"] for item in saved["items"]}
+
+
+@pytest.mark.asyncio
 async def test_mark_all_read_by_genre_protects_saved(client: AsyncClient) -> None:
     await _seed_articles(client)
 
