@@ -342,3 +342,22 @@ async def test_create_genre_rule_404_for_missing_genre(client: AsyncClient) -> N
         "/api/genre-rules", json={"tag": "foo", "genre_id": 999999, "is_generic": False}
     )
     assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_articles_filters_by_genre(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["llm"], title="AI の記事")
+        await _make_article(session, feed.id, "g2", ["baseball"], title="野球の記事")
+        await reclassify_all(session)
+        await session.commit()
+
+    res = await client.get("/api/articles", params={"genre": "ai"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 1
+    assert data["items"][0]["title"] == "AI の記事"

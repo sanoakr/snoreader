@@ -111,6 +111,7 @@ async def _process_phase1_one() -> bool:
     from app.ai.task_queue import PRIORITY_BACKGROUND
     from app.database import async_session
     from app.models import Article, Tag
+    from app.services.genre_classifier import classify, load_rules
 
     now = time.monotonic()
     skip_ids = [aid for aid, until in _llm_skip_until.items() if until > now]
@@ -173,7 +174,11 @@ async def _process_phase1_one() -> bool:
             if summary:
                 article.ai_summary = summary
             if pairs:
-                article.tag_suggestions = _json.dumps([en for en, _ in pairs])
+                tags = [en for en, _ja in pairs]
+                article.tag_suggestions = _json.dumps(tags)
+                # tag_suggestions と同じトランザクション・同じタグ列で genre も決める
+                rules = await load_rules(session)
+                article.genre = classify(tags, rules)
             # summary succeeded but no tags: leave tag_suggestions unset,
             # Phase 2 will backfill it later
             await session.commit()
@@ -195,6 +200,7 @@ async def _process_phase2_one() -> bool:
     from app.ai.task_queue import PRIORITY_BACKGROUND
     from app.database import async_session
     from app.models import Article, Tag
+    from app.services.genre_classifier import classify, load_rules
 
     now = time.monotonic()
     skip_ids = [aid for aid, until in _llm_skip_until.items() if until > now]
@@ -233,7 +239,11 @@ async def _process_phase2_one() -> bool:
         article = await session.get(Article, article_id)
         if not article:
             return True
-        article.tag_suggestions = _json.dumps([en for en, _ in pairs])
+        tags = [en for en, _ja in pairs]
+        article.tag_suggestions = _json.dumps(tags)
+        # tag_suggestions と同じトランザクション・同じタグ列で genre も決める
+        rules = await load_rules(session)
+        article.genre = classify(tags, rules)
         await session.commit()
 
     logger.debug("Phase2 processed article %d: %s", article_id, title[:50])
