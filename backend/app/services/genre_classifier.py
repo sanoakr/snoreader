@@ -80,6 +80,9 @@ def _parse_tags(raw: str | None) -> list[str]:
         tags = json.loads(raw)
     except (ValueError, TypeError):
         return []
+    if not isinstance(tags, list):
+        # 構文としては妥当だが list ではない JSON（null / 数値 / dict など）を弾く
+        return []
     return [t for t in tags if isinstance(t, str)]
 
 
