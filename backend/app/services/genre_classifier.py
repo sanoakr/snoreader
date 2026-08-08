@@ -13,6 +13,9 @@ from dataclasses import dataclass
 # どのルールにも当たらなかった記事の受け皿。genres テーブルに行は持たない予約キー
 OTHER_GENRE = "other"
 
+# priority が未登録のジャンルは最も低い優先度として扱う
+_FALLBACK_PRIORITY = 1_000_000
+
 
 @dataclass(frozen=True)
 class GenreRules:
@@ -25,7 +28,7 @@ class GenreRules:
 
 def _resolve(genres: list[str], rules: GenreRules) -> str:
     """候補ジャンルから priority 最小のものを返す。同値は key の辞書順で決める。"""
-    return min(genres, key=lambda g: (rules.priority.get(g, 1_000_000), g))
+    return min(genres, key=lambda g: (rules.priority.get(g, _FALLBACK_PRIORITY), g))
 
 
 def classify(tags: list[str], rules: GenreRules) -> str:
