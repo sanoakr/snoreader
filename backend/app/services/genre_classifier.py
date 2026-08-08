@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Article, Genre, GenreRule
@@ -21,6 +21,9 @@ OTHER_GENRE = "other"
 
 # priority が未登録のジャンルは最も低い優先度として扱う
 _FALLBACK_PRIORITY = 1_000_000
+
+# reclassify_all の一括 UPDATE バッチサイズ（main.py _backfill_normalized_urls に合わせる）
+_RECLASSIFY_BATCH_SIZE = 1000
 
 
 @dataclass(frozen=True)
@@ -89,19 +92,29 @@ def parse_tags(raw: str | None) -> list[str]:
 async def reclassify_all(session: AsyncSession) -> int:
     """tag_suggestions を持つ全記事を分類し直し、変化した件数を返す。
 
-    LLM を呼ばないので数千件でも一瞬で終わる。commit は呼び出し側が行う。
+    LLM は呼ばないが、本番相当の件数（3000 件弱）では数十秒かかる
+    （実測 47 秒）。`content` を含む全列を ORM で読むと 1 記事あたり数十KB
+    (本番で content 計 91MB) を無駄に読み込むため、必要な 3 列だけ SELECT し、
+    変化があった行だけ `_backfill_normalized_urls`（main.py）と同じ型で
+    バッチ UPDATE する。commit は呼び出し側が行う。
     """
     rules = await load_rules(session)
-    articles = (
-        await session.execute(select(Article).where(Article.tag_suggestions.isnot(None)))
-    ).scalars().all()
+    rows = (
+        await session.execute(
+            select(Article.id, Article.tag_suggestions, Article.genre).where(
+                Article.tag_suggestions.isnot(None)
+            )
+        )
+    ).all()
 
-    changed = 0
-    for article in articles:
-        genre = classify(parse_tags(article.tag_suggestions), rules)
-        if article.genre != genre:
-            article.genre = genre
-            changed += 1
-    if changed:
+    updates = []
+    for article_id, tag_suggestions, current_genre in rows:
+        genre = classify(parse_tags(tag_suggestions), rules)
+        if genre != current_genre:
+            updates.append({"id": article_id, "genre": genre})
+
+    for i in range(0, len(updates), _RECLASSIFY_BATCH_SIZE):
+        await session.execute(update(Article), updates[i : i + _RECLASSIFY_BATCH_SIZE])
+    if updates:
         await session.flush()
-    return changed
+    return len(updates)
