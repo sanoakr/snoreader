@@ -122,9 +122,9 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
       <nav className="flex-1 p-2 space-y-0.5">
         {/* All articles */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
+          onClick={() => onFilterChange({ ...filters, genre: undefined, dismissed: undefined, feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
-            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null && !filters.untagged && !filters.recommended && !filters.unrecommended && !filters.extract_failed ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+            filters.feed_id == null && filters.is_saved == null && filters.tag_id == null && !filters.untagged && !filters.recommended && !filters.unrecommended && !filters.extract_failed && filters.genre == null && !filters.dismissed ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
         >
           <span>All</span>
@@ -167,7 +167,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
+          onClick={() => onFilterChange({ ...filters, genre: undefined, dismissed: undefined, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.is_saved === true && filters.tag_id == null && !filters.untagged ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
@@ -327,7 +327,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         {feeds?.map((feed) => (
           <div key={feed.id} className="group flex items-center">
             <button
-              onClick={() => onFilterChange({ ...filters, feed_id: feed.id, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
+              onClick={() => onFilterChange({ ...filters, genre: undefined, dismissed: undefined, feed_id: feed.id, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
               className={`flex-1 text-left px-3 py-1.5 rounded text-sm truncate flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-800 ${
                 filters.feed_id === feed.id ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
               }`}
@@ -516,6 +516,8 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             </button>
             {showGenreManager && (
               <GenreManagerModal
+                filters={filters}
+                onFilterChange={onFilterChange}
                 onNavigateToOther={() => {
                   setShowGenreManager(false);
                   onFilterChange({ ...filters, genre: 'other', dismissed: undefined });

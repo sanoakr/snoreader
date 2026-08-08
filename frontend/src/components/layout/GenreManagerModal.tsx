@@ -7,6 +7,7 @@ import {
   useCreateGenreRule,
   useDeleteGenreRule,
 } from '../../hooks/useGenres';
+import type { ArticleFilters } from '../../types';
 
 // 新規ジャンルの初期優先度。数字が小さいほど分類時に優先される。
 const DEFAULT_NEW_GENRE_PRIORITY = 100;
@@ -14,11 +15,14 @@ const DEFAULT_NEW_GENRE_PRIORITY = 100;
 interface Props {
   // 「分類できなかった記事（その他）を見る」導線用。呼び出し元でモーダルを閉じて filter を切り替える。
   onNavigateToOther: () => void;
+  // 削除したジャンルが現在表示中のビューと同じ場合に、その絞り込みから抜けるために必要
+  filters: ArticleFilters;
+  onFilterChange: (f: ArticleFilters) => void;
 }
 
 // サイドバーの「ジャンル管理」セクションの内容。辞書（タグ→ジャンルの割り当て、優先順位）を編集する。
 // FeedSidebar.tsx が肥大化していたため別ファイルに切り出した。
-export function GenreManagerModal({ onNavigateToOther }: Props) {
+export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }: Props) {
   const { data: genres } = useGenres();
   const createGenre = useCreateGenre();
   const updateGenre = useUpdateGenre();
@@ -85,7 +89,13 @@ export function GenreManagerModal({ onNavigateToOther }: Props) {
               onClick={() => {
                 if (!confirm(`ジャンル「${g.label_ja}」を削除しますか？\n所属タグの割り当ても消え、記事は再分類されます。`)) return;
                 deleteGenre.mutate(g.id, {
-                  onSuccess: (res) => setLastReclassified(res.reclassified),
+                  onSuccess: (res) => {
+                    setLastReclassified(res.reclassified);
+                    // 表示中のジャンルを削除した場合、その絞り込みに取り残されないよう解除する
+                    if (filters.genre === g.key) {
+                      onFilterChange({ ...filters, genre: undefined });
+                    }
+                  },
                 });
               }}
               className="text-xs px-1.5 py-0.5 rounded border border-red-300 text-red-600 dark:border-red-700 dark:text-red-400"
