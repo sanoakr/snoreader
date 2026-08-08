@@ -77,6 +77,7 @@ class ArticleOut(BaseModel):
     feed_title: str | None = None
     rec_score: float | None = None
     extract_status: str | None = None
+    dismissed_at: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -102,6 +103,12 @@ class ArticleUpdate(BaseModel):
 
 class MarkAllReadRequest(BaseModel):
     feed_id: int | None = None
+    genre: str | None = None
+
+
+class DismissRequest(BaseModel):
+    genre: str | None = None
+    ids: list[int] | None = None
 
 
 class DedupRequest(BaseModel):

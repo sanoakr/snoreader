@@ -18,7 +18,7 @@ async def list_feeds(session: AsyncSession = Depends(get_session)):
     # Subquery for unread count
     unread_sub = (
         select(Article.feed_id, func.count().label("unread_count"))
-        .where(Article.is_read == False)  # noqa: E712
+        .where(Article.is_read == False, Article.dismissed_at.is_(None))  # noqa: E712
         .group_by(Article.feed_id)
         .subquery()
     )

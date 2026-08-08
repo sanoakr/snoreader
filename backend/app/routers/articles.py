@@ -26,6 +26,7 @@ from app.schemas import (
     ChatSource,
     DedupRequest,
     DedupResponse,
+    DismissRequest,
     ExtractActionRequest,
     GenreCountOut,
     MarkAllReadRequest,
@@ -45,6 +46,7 @@ async def list_articles(
     tag_id: int | None = None,
     untagged: bool = False,
     genre: str | None = None,
+    dismissed: bool = False,
     sort: str = "published_at",
     order: str = "desc",
     offset: int = Query(0, ge=0),
@@ -73,9 +75,18 @@ async def list_articles(
         stmt = stmt.where(Article.genre == genre)
         count_stmt = count_stmt.where(Article.genre == genre)
 
+    # 通常の読書導線からは外し、Dismissed ビューでだけ見せる
+    if dismissed:
+        stmt = stmt.where(Article.dismissed_at.isnot(None))
+        count_stmt = count_stmt.where(Article.dismissed_at.isnot(None))
+    else:
+        stmt = stmt.where(Article.dismissed_at.is_(None))
+        count_stmt = count_stmt.where(Article.dismissed_at.is_(None))
+
     # Sort
     allowed_sorts = {"published_at", "fetched_at", "title"}
     sort_col = getattr(Article, sort) if sort in allowed_sorts else Article.published_at
+    sort_col = Article.dismissed_at if dismissed else sort_col
     stmt = stmt.order_by(sort_col.desc() if order == "desc" else sort_col.asc())
     stmt = stmt.offset(offset).limit(limit)
 
@@ -167,6 +178,7 @@ async def get_recommended_articles(
         .where(
             Article.is_read == False,  # noqa: E712
             Article.is_saved == False,  # noqa: E712
+            Article.dismissed_at.is_(None),
             Article.tag_suggestions.isnot(None),
         )
     )
@@ -234,6 +246,7 @@ async def get_unrecommended_articles(
         .where(
             Article.is_read == False,  # noqa: E712
             Article.is_saved == False,  # noqa: E712
+            Article.dismissed_at.is_(None),
             Article.tag_suggestions.isnot(None),
         )
     )
@@ -554,6 +567,13 @@ async def mark_all_read(
     stmt = select(Article).where(Article.is_read == False)  # noqa: E712
     if body.feed_id is not None:
         stmt = stmt.where(Article.feed_id == body.feed_id)
+    if body.genre is not None:
+        # 一括 dismiss が保存済みを保護する以上、genre 一括だけ保護しないのは非対称
+        stmt = stmt.where(
+            Article.genre == body.genre,
+            Article.is_saved == False,  # noqa: E712
+            Article.dismissed_at.is_(None),
+        )
 
     result = await session.execute(stmt)
     articles = result.scalars().all()
@@ -564,6 +584,57 @@ async def mark_all_read(
         count += 1
     await session.commit()
     return {"marked": count}
+
+
+def _dismiss_targets(body: DismissRequest, *, restoring: bool):
+    """dismiss / undismiss の対象を絞る WHERE 条件を組む。"""
+    conds = []
+    if body.ids:
+        conds.append(Article.id.in_(body.ids))
+    elif body.genre:
+        conds.append(Article.genre == body.genre)
+    if restoring:
+        conds.append(Article.dismissed_at.isnot(None))
+    else:
+        # 保存済みは常に保護する。誤って束で捨てても資料が消えないようにするため
+        conds.append(Article.is_saved == False)  # noqa: E712
+        conds.append(Article.dismissed_at.is_(None))
+    return conds
+
+
+@router.post("/articles/dismiss", response_model=dict)
+async def dismiss_articles(
+    body: DismissRequest, session: AsyncSession = Depends(get_session)
+):
+    """記事を一覧から外す。is_read は変えないので自動削除の対象にならない。"""
+    if not body.ids and not body.genre:
+        raise HTTPException(status_code=422, detail="Either genre or ids is required")
+
+    now = datetime.now(timezone.utc).isoformat()
+    articles = (
+        await session.execute(select(Article).where(*_dismiss_targets(body, restoring=False)))
+    ).scalars().all()
+    for article in articles:
+        article.dismissed_at = now
+    await session.commit()
+    return {"dismissed": len(articles)}
+
+
+@router.post("/articles/undismiss", response_model=dict)
+async def undismiss_articles(
+    body: DismissRequest, session: AsyncSession = Depends(get_session)
+):
+    """一度非表示にした記事を通常の一覧に戻す。"""
+    if not body.ids and not body.genre:
+        raise HTTPException(status_code=422, detail="Either genre or ids is required")
+
+    articles = (
+        await session.execute(select(Article).where(*_dismiss_targets(body, restoring=True)))
+    ).scalars().all()
+    for article in articles:
+        article.dismissed_at = None
+    await session.commit()
+    return {"restored": len(articles)}
 
 
 @router.post("/articles/dedup", response_model=DedupResponse)
