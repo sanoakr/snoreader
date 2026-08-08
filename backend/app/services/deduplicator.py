@@ -96,8 +96,15 @@ async def _refresh_normalized_urls(session: AsyncSession) -> None:
         await session.flush()
 
 
-async def _merge_into_keeper(session: AsyncSession, keeper: Article, loser: Article) -> None:
-    """loser の状態・タグ・本文を keeper にマージしてから loser を削除する。"""
+async def _merge_into_keeper(
+    session: AsyncSession, keeper: Article, loser: Article, rules: "GenreRules"
+) -> None:
+    """loser の状態・タグ・本文を keeper にマージしてから loser を削除する。
+
+    `rules` は呼び出し側（`dedup_articles`）が dedup 実行 1 回につき 1 度だけ
+    `load_rules()` で読み込んだスナップショットを渡す。マージ対象は多いこともあるため、
+    ここで毎回 DB から読み直すと無駄が大きい。
+    """
     if loser.is_read and not keeper.is_read:
         keeper.is_read = True
         keeper.read_at = keeper.read_at or loser.read_at
@@ -105,9 +112,19 @@ async def _merge_into_keeper(session: AsyncSession, keeper: Article, loser: Arti
         keeper.is_saved = True
         keeper.saved_at = keeper.saved_at or loser.saved_at
 
+    # 片方でも非表示なら非表示のままにする。ここで引き継がないと、
+    # 毎フェッチ後の dedup で非表示にしたはずの記事が未読に戻る
+    if loser.dismissed_at and not keeper.dismissed_at:
+        keeper.dismissed_at = loser.dismissed_at
+
     for field in ("content", "ai_summary", "tag_suggestions", "image_url"):
         if getattr(keeper, field) is None and getattr(loser, field) is not None:
             setattr(keeper, field, getattr(loser, field))
+
+    # tag_suggestions が loser 由来に差し替わることがあるので、ジャンルは計算し直す
+    from app.services.genre_classifier import _parse_tags, classify
+
+    keeper.genre = classify(_parse_tags(keeper.tag_suggestions), rules)
 
     loser_assocs = (
         await session.execute(select(ArticleTag).where(ArticleTag.article_id == loser.id))
@@ -154,6 +171,14 @@ async def dedup_articles(
         duplicate_groups = 0
         deleted = 0
 
+        # dry_run では実際にはマージしないので読み込まない。ルール表は dedup 実行中に
+        # 変化しない前提でループの外で 1 度だけ読み込み、マージごとの再読み込みを避ける
+        rules = None
+        if not dry_run:
+            from app.services.genre_classifier import load_rules
+
+            rules = await load_rules(session)
+
         for key in dup_keys:
             rows = (
                 await session.execute(
@@ -182,7 +207,7 @@ async def dedup_articles(
                 continue
 
             for loser in losers:
-                await _merge_into_keeper(session, keeper, loser)
+                await _merge_into_keeper(session, keeper, loser, rules)
                 deleted += 1
 
         if dry_run:

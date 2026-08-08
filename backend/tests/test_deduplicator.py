@@ -357,3 +357,55 @@ async def test_dedup_backfills_missing_normalized_url(client: AsyncClient) -> No
     res = await client.post("/api/articles/dedup", json={"dry_run": False})
     assert res.json()["duplicate_groups"] == 1
     assert res.json()["deleted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dedup_keeps_dismissed_state(client: AsyncClient) -> None:
+    """はてブ側で非表示にした記事が、元サイト側の生存で復活しないこと。"""
+    from app.database import async_session
+    from app.models import Article
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        hatena_feed = await _make_feed(session, "https://b.hatena.ne.jp/hotentry/it.rss")
+        normal_feed = await _make_feed(session, "https://normal.example.com/feed")
+        await _make_article(
+            session, hatena_feed.id, "g1", "https://news.example.com/story",
+            dismissed_at="2026-08-08T00:00:00+00:00",
+        )
+        await _make_article(session, normal_feed.id, "g2", "https://news.example.com/story")
+        await session.commit()
+
+    res = await client.post("/api/articles/dedup", json={"dry_run": False})
+    assert res.json()["deleted"] == 1
+
+    async with async_session() as session:
+        remaining = (await session.execute(select(Article))).scalars().all()
+        assert len(remaining) == 1
+        assert remaining[0].dismissed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_dedup_recomputes_genre_on_keeper(client: AsyncClient) -> None:
+    """loser の tag_suggestions を引き継いだ keeper のジャンルが計算し直されること。"""
+    import json
+
+    from app.database import async_session
+    from app.models import Article
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        hatena_feed = await _make_feed(session, "https://b.hatena.ne.jp/hotentry/it.rss")
+        normal_feed = await _make_feed(session, "https://normal.example.com/feed")
+        await _make_article(
+            session, hatena_feed.id, "g1", "https://news.example.com/story",
+            tag_suggestions=json.dumps(["baseball"]),
+        )
+        await _make_article(session, normal_feed.id, "g2", "https://news.example.com/story")
+        await session.commit()
+
+    await client.post("/api/articles/dedup", json={"dry_run": False})
+
+    async with async_session() as session:
+        keeper = (await session.execute(select(Article))).scalars().one()
+        assert keeper.genre == "sports"
