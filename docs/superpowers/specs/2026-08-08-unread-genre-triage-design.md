@@ -122,7 +122,7 @@ async def load_rules(session: AsyncSession) -> GenreRules:
 解決規則:
 
 1. `tags` を `tag_to_genre` で引き、ヒットしたジャンルのうち `priority` が最小のものを返す。`priority` が同値の場合は `key` の辞書順で決める（管理 UI は上下移動で一意な値を振るが、API を直接叩けば同値になりうるため、分類結果が実行ごとに揺れないようにする）。
-2. ヒットが無ければ `generic_to_genre` を `tags` の順に引く。
+2. ヒットが無ければ `generic_to_genre` を引き、**通常ルールと同じく `priority` 最小のものを返す**。`tags` の並び順では決めない（並び順は LLM 出力の順であり無秩序なため、汎用ルールが増えたときに分類結果が説明不能になる）。
 3. それも無ければ `"other"`。
 
 ルール表は 150 行程度と小さく、SQLite への問い合わせも安いので、キャッシュは持たず必要な箇所で都度 `load_rules()` する。一括再分類のように多数の記事を回す場合だけ、呼び出し側でループの外に 1 回出す。
@@ -139,8 +139,19 @@ async def load_rules(session: AsyncSession) -> GenreRules:
 | 6 | `politics` | government, politics, policy, geopolitics, law, war, local-government, copyright, gender, labor, disability |
 | 7 | `economy` | finance, economy, business, tax, yen, accounting, payment, marketing, retail, consumer, career, monetization |
 | 8 | `science` | research, psychology, education, university, mathematics, medical, agriculture, wildlife, logic, infection, space, animal |
-| 9 | `entertainment` | entertainment, game, manga, anime, movie, music, comedy, art, story, literature, book, science-fiction, comic |
-| 10 | `life` | health, life, lifestyle, daily-life, food, recipe, travel, relationship, emotion, mental-health, home, history, culture, society, social, community, communication, social-media, railway, transportation, architecture, museum, design, writing, media |
+| 9 | `culture` | history, museum, architecture, art, literature, design, writing, media, culture |
+| 10 | `entertainment` | entertainment, game, manga, anime, movie, music, comedy, story, science-fiction, comic, book |
+| 11 | `life` | health, life, lifestyle, daily-life, food, recipe, travel, relationship, emotion, mental-health, home, weather, society, social, community, communication, social-media, railway, transportation |
+
+`life` は「生活・健康」に絞り、歴史・建築・美術・出版などは `culture` に分ける。1 つのジャンルが広すぎると「まとめて捨てる」判断が効かなくなるため（表示名から想像する中身と実際の中身がずれる）。同じ理由で `weather` を `incident` から `life` へ移した。通常の天気記事まで「事件・災害」として一括処理されるのを避ける。
+
+この調整後の実測分布（未読 617 件）:
+
+```
+dev 116 (19%)  ai 96 (16%)  politics 60 (10%)  incident 50 (8%)  other 50 (8%)
+science 45 (7%)  life 42 (7%)  culture 41 (7%)  economy 39 (6%)
+entertainment 37 (6%)  sports 21 (3%)  security 20 (3%)
+```
 
 日本語表示名は `genres.label_ja` に持つ（`ai` → 「AI・LLM」、`dev` → 「開発・技術」、`incident` → 「事件・災害」など）。フロントは API が返す表示名をそのまま使い、定数表を持たない。
 
@@ -148,8 +159,8 @@ async def load_rules(session: AsyncSession) -> GenreRules:
 
 ## 分類の適用タイミング
 
-1. **新規・更新時** — `background_processor.py` で `tag_suggestions` を書く 2 箇所（Phase 1 の `_process_one`、Phase 2 のタグバックフィル）で、同じトランザクション内で `article.genre = classify(tags)` を設定する。
-2. **バックフィル** — `main.py` の lifespan、既存の `normalized_url` バックフィルと同じ位置で、`genre IS NULL AND tag_suggestions IS NOT NULL` の行を分類して埋める。
+1. **新規・更新時** — `background_processor.py` で `tag_suggestions` を書く 2 箇所（`_process_phase1_one`、`_process_phase2_one`）で、同じトランザクション内で `article.genre = classify(tags, rules)` を設定する。
+2. **バックフィル** — `main.py` の lifespan、既存の `normalized_url` バックフィルと同じ位置で、`genre IS NULL AND tag_suggestions IS NOT NULL` の行を分類して埋める。**シード投入を必ずバックフィルより先に実行する。** 順序が逆だと空のルールで全件が `genre="other"` に確定し、`genre IS NULL` を条件とする以後のバックフィルでは二度と拾えなくなる（再分類 API を叩くまで誰も気づかない）。
 3. **ルール変更時の再分類** — ジャンル / ルールを追加・変更・削除する API はいずれも、コミット後にその場で全件再分類を実行し、レスポンスに `reclassified` 件数を含める（`POST /exclude-patterns` が追加時に既存記事を purge して `purged` を返すのと同じ作法）。LLM を呼ばず `tag_suggestions` を読み直すだけなので、数千件でも一瞬で終わる。再分類だけを単独で実行できるよう `POST /articles/reclassify-genres` も用意する。
 
 `tag_suggestions` が無い記事の `genre` は `NULL` のままとし、ジャンル一覧では「未分類」として扱わない（背景処理が進めば自然に埋まるため）。
@@ -181,26 +192,46 @@ async def load_rules(session: AsyncSession) -> GenreRules:
 
 - `POST /articles/dismiss` — body `{"genre": "sports"}` または `{"ids": [1,2,3]}`。`genre` 指定・`ids` 指定のどちらでも対象は `is_saved == False AND dismissed_at IS NULL` の記事に限る（保存済みは常に保護。`ids` に保存済みが含まれていても無視して件数に数えない）。`dismissed_at` に現在時刻を入れ、`{"dismissed": <件数>}` を返す。
 - `POST /articles/undismiss` — 同じ body 形式。対象は `dismissed_at IS NOT NULL` の記事。`dismissed_at` を `NULL` に戻し、`{"restored": <件数>}` を返す。
-- 一括既読は既存の `POST /articles/mark-all-read` に `genre` パラメータを追加して賄う（新規エンドポイントを作らない）。`genre` 指定時の対象からは dismissed 記事を除く。
+- 一括既読は既存の `POST /articles/mark-all-read` に `genre` パラメータを追加して賄う（新規エンドポイントを作らない）。`genre` 指定時の対象からは dismissed 記事を除き、**`is_saved == False` も条件に加える**。既存の `mark_all_read`（`articles.py:513`）は `is_read == False` だけで絞っており保存済み未読も既読化してしまうが、一括 dismiss が保存済みを保護する以上、genre 一括だけ保護しないのは非対称で事故のもとになる。全体・フィード指定時の既存挙動は後方互換のため変更しない（変えるなら別件）。
 
 `genre` と `ids` の両方が空の body は 422 を返す。両方指定された場合は `ids` を優先する。
 
 ### dismissed の除外範囲
 
+原則: **通常の読書導線からは外し、管理・復旧導線には出す。**
+
 | 対象 | 挙動 |
 |---|---|
 | `GET /articles`（既定） | 除外 |
-| `GET /articles/recommended` / `unrecommended` | 除外 |
+| `GET /articles/recommended` | 除外 |
+| `GET /articles/unrecommended` | 除外 |
 | `GET /feeds` の `unread_count`（`feeds.py:20`） | 除外 |
 | `GET /articles/search` | **含める**（誤って捨てた記事の復旧経路として必要） |
+| `GET /articles/extract-failed` | **含める**（本文抽出の管理キュー。隠すと再試行も削除もできないゴミが残る） |
 | `GET /articles/{id}` | 含める（直接参照は常に可能） |
 
-検索結果に dismissed が混ざるため、`ArticleOut` に `dismissed_at` を追加してフロントでバッジ表示できるようにする。
+`GET /articles/recommended` と `GET /articles/unrecommended` は `list_articles` とは別関数で独自に WHERE を組んでいる（`articles.py:90` / `articles.py:176`）。`GET /articles` に条件を足しただけでは反映されないので、**それぞれの関数に個別に `dismissed_at IS NULL` を追加する**。
+
+検索結果と抽出失敗一覧に dismissed が混ざるため、`ArticleOut` に `dismissed_at` を追加してフロントでバッジ表示できるようにする。
+
+## 既存機能への影響
+
+### 重複記事の統合（必須の修正）
+
+`deduplicator.py` の `_merge_into_keeper()` は loser から keeper へ引き継ぐフィールドを明示列挙している（`is_read` / `is_saved` を個別処理し、`("content", "ai_summary", "tag_suggestions", "image_url")` をループでコピー）。**ここに `dismissed_at` と `genre` を足さないと、dedup のたびに dismissed 状態が消える。**
+
+dedup は `fetch_all_feeds()` から毎フェッチ後に自動実行され、生存優先順位は「保存済み > 非はてなブックマーク由来 > 古い `fetched_at` > 小さい id」。捨てた記事の多くははてブ総合経由（未読の 57%）なので、同じ URL の記事が元サイトのフィードから後に来ると keeper が非はてブ側になり、**捨てたはずの記事が未読として復活する**。
+
+修正内容:
+
+- `dismissed_at` — `is_read` と同じく OR 的に伝播する。`loser.dismissed_at` があり `keeper.dismissed_at` が `NULL` なら keeper に入れる。片方でも捨てられていれば捨てられたままにする。
+- `genre` — `("content", "ai_summary", ...)` のループに足す（keeper 側が `NULL` のときだけコピー）。keeper の `tag_suggestions` が loser 由来に差し替わる場合もあるため、マージ後に `keeper.genre = classify(...)` で計算し直す方が正確。実装はこちらを採る。
 
 ## フロントエンド
 
 - `types.ts` の `ArticleFilters` に `genre?: string`、`dismissed?: boolean` を追加。`Article` に `dismissed_at: string | null`。
-- `hooks/useArticles.ts` に `useGenres()`（`GET /articles/genres`）と `useDismiss()` / `useUndismiss()` を追加。ミューテーション成功時は `['articles']` `['article-genres']` `['feeds']` を invalidate する（一括操作は影響範囲が広く、既存の in-place マージ方針は適用しない）。
+- `hooks/useArticles.ts` に `useGenreCounts()`（`GET /articles/genres`、クエリキー `['genre-counts']`）と `useDismiss()` / `useUndismiss()` を追加。ジャンル定義 CRUD 側のキーは `['genres']` とし、名前で取り違えないようにする。
+- ミューテーション成功時の invalidate は `['articles']` `['genre-counts']` `['feeds']` `['recommended-count']` `['unrecommended-count']`。既存の `useMarkAllRead`（`useArticles.ts:54`）が invalidate している対象に揃える。dismissed は Recommend / Unrecommend からも除外されるので、これを落とすとサイドバーのバッジが古いまま残る。一括操作は影響範囲が広いため、既存の in-place マージ方針は適用しない。
 - `FeedSidebar.tsx` に「ジャンル」セクションを追加。フィード一覧と同じ見た目で、ジャンル名（`label_ja`）と未読件数バッジを並べる。件数 0 のジャンルは表示しない。最下部に Dismissed ビューへの導線を置く。
 - 同じく `FeedSidebar.tsx` に「ジャンル管理」を追加する。既存の `除外パターン管理` と同じ位置・同じモーダルの作法で、次を行えるようにする。
   - ジャンルの追加・削除、表示名の変更、優先順位の変更（上下移動ボタンで `priority` を入れ替える）
@@ -209,9 +240,13 @@ async def load_rules(session: AsyncSession) -> GenreRules:
   - 汎用ルール（`is_generic`）はチェックボックスで区別し、チップの見た目も変える
   - 変更のたびにレスポンスの `reclassified` 件数をトーストなしの短いテキストで表示し、`['articles']` `['article-genres']` `['genres']` を invalidate する
   - `other` に落ちている記事へは、この画面からワンクリックで一覧（`?genre=other`）へ飛べるようにする。辞書を育てる導線がここで閉じる
-- `ArticleList.tsx` のツールバーに、`filters.genre` が設定されているときだけ「まとめて既読」「まとめて捨てる」を出す。既存の `重複記事を整理` などと同様に、件数を含む `confirm()` を挟む。
+- `ArticleList.tsx` のツールバーに、`filters.genre` が設定されているときだけ「まとめて既読」「まとめて非表示」を出す。既存の `重複記事を整理` などと同様に、件数を含む `confirm()` を挟む。
+- **検索中（`searchQuery` が非空）は一括ボタンを無効化する。** `useSearchArticles`（`useArticles.ts:143`）は `{ feed_id, is_saved }` しか受け取らず `genre` を渡せない独立モードであり、検索で絞り込んだ表示に対して一括操作を押しても API には `{"genre": ...}` だけが飛び、**画面に見えている数件ではなくそのジャンルの全未読が処理される**。無効化時はツールチップで理由を示す。
+- 実行直後にツールバー下へ `56 件を非表示にしました　[元に戻す]` を出し、その場で `undismiss` を呼べるようにする（対象 ID を控えておく）。次の操作か画面遷移で消える。一括操作は多数の記事の扱いを一度に決めるため、事前の `confirm()` だけでなく事後の撤回経路を持たせる。
 - Dismissed ビューでは同じ位置に「まとめて戻す」を出す。
-- 検索結果とリストのカードで `dismissed_at` が非 `NULL` の記事に「捨てた」バッジを出す（`ExtractStatusBadge` と同じ作りの小さなバッジ）。
+- 検索結果・抽出失敗一覧のカードで `dismissed_at` が非 `NULL` の記事に「非表示」バッジを出す（`ExtractStatusBadge` と同じ作りの小さなバッジ）。
+
+UI 文言は「捨てる」ではなく「非表示にする」で統一する。この設計の核心は「既読化せず自動削除から守り、後で戻せる」という可逆性なのに、「捨てる」は消えて戻らない印象を与え、実際の挙動を利用者に伝えないため。内部名は `dismissed` のままとする。
 
 ## テスト
 
@@ -240,6 +275,13 @@ async def load_rules(session: AsyncSession) -> GenreRules:
 - dismissed 記事が `GET /articles/search` には出る
 - `POST /articles/undismiss` で元に戻り、再び `GET /articles` に現れる
 - `genre` も `ids` も無い body で 422
+- dismissed 記事が `GET /articles/recommended` と `GET /articles/unrecommended` にも出てこない
+- `POST /articles/mark-all-read` に `genre` を渡したとき、保存済み未読記事が既読にならない
+
+`backend/tests/test_deduplicator.py`（既存ファイルに追記）:
+
+- dismissed の loser と未 dismiss の keeper をマージすると、keeper が dismissed のまま残る（捨てた記事が dedup で復活しない）
+- マージ後に keeper の `genre` が再計算される
 
 フロントエンドはテスト基盤が無いため、実データでの目視確認とする。
 
@@ -250,7 +292,7 @@ async def load_rules(session: AsyncSession) -> GenreRules:
 1. `genres` / `genre_rules` テーブル + シード + 分類器 + `Article` のカラム 2 本（`genre` と `dismissed_at` はまとめて足す。使わないカラムがあっても無害）+ バックフィル + `GET /articles/genres`。分類結果は API のレスポンスで確認する。
 2. ジャンルフィルタ + サイドバーのジャンルセクション（読むだけ）。ここで実データの分類品質を目で見る。
 3. ジャンル定義の CRUD API + ジャンル管理 UI。辞書を直せるようにする。
-4. 一括操作 + Dismissed ビュー + 各一覧からの dismissed 除外。
+4. 一括操作 + Dismissed ビュー + 各一覧からの dismissed 除外 + `_merge_into_keeper` の引き継ぎ修正。dedup 修正は dismissed を導入する第 4 段階と同時に入れる（先に入れても意味が無く、後に回すと捨てた記事が復活する窓ができる）。
 
 第 3 段階を第 4 段階より前に置くのは、**捨てる操作を入れる前に辞書を直せる状態にしておく**ため。分類が粗いまま一括 dismiss を使えるようにすると、読むべき記事をまとめて捨てる事故が起きやすい。
 
