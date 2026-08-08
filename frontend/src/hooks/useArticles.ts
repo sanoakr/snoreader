@@ -156,6 +156,42 @@ export function useExtractFailed() {
   });
 }
 
+export function useGenreCounts() {
+  return useQuery({
+    queryKey: ['genre-counts'],
+    queryFn: api.getGenreCounts,
+    staleTime: 30_000,
+  });
+}
+
+// 一括操作は影響範囲が広いので、既存の in-place マージではなく invalidate する
+function useInvalidateAfterBulk() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: ['articles'] });
+    qc.invalidateQueries({ queryKey: ['genre-counts'] });
+    qc.invalidateQueries({ queryKey: ['feeds'] });
+    qc.invalidateQueries({ queryKey: ['recommended-count'] });
+    qc.invalidateQueries({ queryKey: ['unrecommended-count'] });
+  };
+}
+
+export function useDismiss() {
+  const invalidate = useInvalidateAfterBulk();
+  return useMutation({
+    mutationFn: (body: { genre?: string; ids?: number[] }) => api.dismissArticles(body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUndismiss() {
+  const invalidate = useInvalidateAfterBulk();
+  return useMutation({
+    mutationFn: (body: { genre?: string; ids?: number[] }) => api.undismissArticles(body),
+    onSuccess: invalidate,
+  });
+}
+
 export function useExtractAction() {
   const qc = useQueryClient();
   return useMutation({

@@ -31,6 +31,27 @@ export interface ExcludePattern {
   purged: number;
 }
 
+export interface GenreCount {
+  genre: string;
+  label_ja: string;
+  unread_count: number;
+}
+
+export interface GenreRuleDef {
+  id: number;
+  tag: string;
+}
+
+export interface GenreDef {
+  id: number;
+  key: string;
+  label_ja: string;
+  priority: number;
+  rules: GenreRuleDef[];
+  generic_rules: GenreRuleDef[];
+  reclassified: number;
+}
+
 export interface Article {
   id: number;
   feed_id: number;
@@ -46,6 +67,7 @@ export interface Article {
   feed_title: string | null;
   rec_score?: number;
   extract_status?: string | null;
+  dismissed_at: string | null;
 }
 
 export type ExtractAction = 'retry' | 'skip' | 'delete';
@@ -77,6 +99,8 @@ export interface ArticleFilters {
   recommended?: boolean;
   unrecommended?: boolean;
   extract_failed?: boolean;
+  genre?: string;
+  dismissed?: boolean;
 }
 
 export interface ChatMessage {

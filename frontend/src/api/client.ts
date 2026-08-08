@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ExcludePattern, ExtractAction, Feed, PaginatedArticles, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -58,6 +58,8 @@ export function getArticles(
   if (filters.is_saved != null) params.set('is_saved', String(filters.is_saved));
   if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
   if (filters.untagged) params.set('untagged', 'true');
+  if (filters.genre) params.set('genre', filters.genre);
+  if (filters.dismissed != null) params.set('dismissed', String(filters.dismissed));
   if (filters.sort) params.set('sort', filters.sort);
   if (filters.order) params.set('order', filters.order);
   params.set('offset', String(offset));
@@ -101,6 +103,64 @@ export function dedupArticles(dryRun: boolean): Promise<DedupResult> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
   });
+}
+
+export function getGenreCounts(): Promise<GenreCount[]> {
+  return fetchJSON(`${BASE}/articles/genres`);
+}
+
+export function dismissArticles(body: { genre?: string; ids?: number[] }): Promise<{ dismissed: number }> {
+  return fetchJSON(`${BASE}/articles/dismiss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function undismissArticles(body: { genre?: string; ids?: number[] }): Promise<{ restored: number }> {
+  return fetchJSON(`${BASE}/articles/undismiss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+// --- Genres ---
+
+export function getGenres(): Promise<GenreDef[]> {
+  return fetchJSON(`${BASE}/genres`);
+}
+
+export function createGenre(body: { key: string; label_ja: string; priority: number }): Promise<GenreDef> {
+  return fetchJSON(`${BASE}/genres`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateGenre(id: number, body: { label_ja?: string; priority?: number }): Promise<GenreDef> {
+  return fetchJSON(`${BASE}/genres/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteGenre(id: number): Promise<{ reclassified: number }> {
+  return fetchJSON(`${BASE}/genres/${id}`, { method: 'DELETE' });
+}
+
+export function createGenreRule(body: { tag: string; genre_id: number; is_generic: boolean }): Promise<{ reclassified: number }> {
+  return fetchJSON(`${BASE}/genre-rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteGenreRule(id: number): Promise<{ reclassified: number }> {
+  return fetchJSON(`${BASE}/genre-rules/${id}`, { method: 'DELETE' });
 }
 
 // --- Exclude patterns ---
