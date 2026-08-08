@@ -25,6 +25,9 @@ const EXTRACT_STATUS_COLOR: Record<string, string> = {
   skipped: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
 };
 
+// 選択位置が読み込み済みリストの終端からこの件数以内に入ったら次ページを取得する
+const NEXT_PAGE_LOOKAHEAD = 5;
+
 function ExtractStatusBadge({ status }: { status: string | null | undefined }) {
   if (!status) return null;
   const label = EXTRACT_STATUS_LABEL[status] ?? status;
@@ -42,6 +45,9 @@ interface Props {
 export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }: Props) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // リスト外の記事 (Related saved) を開いている間、前後ナビゲーションの基準に
+  // する「飛び元」記事 ID。リスト内の記事を開いている間は null。
+  const [anchorId, setAnchorId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -179,9 +185,32 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, isSearching, isExtractFailedView]);
 
-  const currentIndex = displayArticles.findIndex(a => a.id === selectedId);
-  const hasPrev = currentIndex > 0;
+  // 選択中の記事がリスト内にあればその位置、無ければ (Related saved から
+  // ジャンプした等) 飛び元の記事 = anchorId の位置を基準にする。
+  // これが無いと currentIndex = -1 のまま hasPrev/hasNext が両方 false になり、
+  // モバイルのフリック移動と前後ボタンが復帰不能に無効化される。
+  const listIndex = displayArticles.findIndex(a => a.id === selectedId);
+  const anchorIndex = anchorId != null ? displayArticles.findIndex(a => a.id === anchorId) : -1;
+  const isOffList = listIndex < 0 && anchorIndex >= 0;
+  const currentIndex = listIndex >= 0 ? listIndex : anchorIndex;
+  const hasPrev = isOffList
+    ? currentIndex >= 0 && currentIndex < displayArticles.length
+    : currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < displayArticles.length - 1;
+
+  // モバイルでは Reader がリストを覆い scrollIntoView も行わないため、
+  // 無限スクロールの sentinel が可視化されず fetchNextPage が発火しない。
+  // 読み込み済みリストの終端に近づいたら明示的に次ページを取得しないと、
+  // 末尾の記事で hasNext = false になりフリックでの前進が止まる。
+  useEffect(() => {
+    if (isSearching || isExtractFailedView) return;
+    if (!hasNextPage || isFetchingNextPage) return;
+    if (currentIndex < 0) return;
+    if (currentIndex >= displayArticles.length - NEXT_PAGE_LOOKAHEAD) fetchNextPage();
+  }, [
+    currentIndex, displayArticles.length, hasNextPage, isFetchingNextPage,
+    fetchNextPage, isSearching, isExtractFailedView,
+  ]);
 
   const goNext = useCallback((idx: number) => {
     const next = idx < displayArticles.length - 1 ? idx + 1 : idx;
@@ -205,9 +234,26 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   }, [currentIndex, displayArticles, queryClient]);
 
   // ArticleReader に渡す安定コールバック（pullDistance 変化で再レンダリングさせない）
-  const handlePrev = useCallback(() => goPrev(currentIndex), [goPrev, currentIndex]);
+  // リスト外の記事 (Related saved) を開いている間の「前へ」は、飛び元の記事に戻す。
+  const handlePrev = useCallback(() => {
+    if (isOffList) {
+      const source = displayArticles[currentIndex];
+      if (source) setSelectedId(source.id);
+      return;
+    }
+    goPrev(currentIndex);
+  }, [isOffList, displayArticles, currentIndex, goPrev]);
   const handleNext = useCallback(() => goNext(currentIndex), [goNext, currentIndex]);
-  const handleSelect = useCallback((id: number) => setSelectedId(id), []);
+  // Related saved のようにリスト外の記事へ飛ぶ場合、飛び元をナビゲーション基準
+  // として残す。リスト外 → リスト外の連続ジャンプでも基準を保持する。
+  const handleSelect = useCallback((id: number) => {
+    setAnchorId(prev => {
+      if (displayArticles.some(a => a.id === id)) return null;
+      if (selectedId != null && displayArticles.some(a => a.id === selectedId)) return selectedId;
+      return prev;
+    });
+    setSelectedId(id);
+  }, [displayArticles, selectedId]);
 
   const selectedArticleFeedId = selectedId != null
     ? displayArticles.find(a => a.id === selectedId)?.feed_id
