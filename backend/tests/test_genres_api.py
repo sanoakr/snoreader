@@ -174,3 +174,89 @@ async def test_reclassify_all_returns_updated_count(client: AsyncClient) -> None
     async with async_session() as session:
         # 変化が無ければ 0 件（毎回 UPDATE を投げない）
         assert await reclassify_all(session) == 0
+
+
+@pytest.mark.asyncio
+async def test_create_genre_rejects_reserved_and_duplicate_key(client: AsyncClient) -> None:
+    res = await client.post("/api/genres", json={"key": "other", "label_ja": "その他", "priority": 50})
+    assert res.status_code == 400
+
+    res = await client.post("/api/genres", json={"key": "ai", "label_ja": "重複", "priority": 50})
+    assert res.status_code == 409
+
+    res = await client.post("/api/genres", json={"key": "hobby", "label_ja": "趣味", "priority": 50})
+    assert res.status_code == 201
+    assert res.json()["key"] == "hobby"
+
+
+@pytest.mark.asyncio
+async def test_rule_moves_between_genres_instead_of_conflicting(client: AsyncClient) -> None:
+    """既に他ジャンルにあるタグを送ったら 409 ではなく付け替える。"""
+    genres = (await client.get("/api/genres")).json()
+    sports_id = next(g["id"] for g in genres if g["key"] == "sports")
+
+    res = await client.post("/api/genre-rules", json={"tag": "llm", "genre_id": sports_id, "is_generic": False})
+    assert res.status_code == 201
+
+    after = (await client.get("/api/genres")).json()
+    tags = {g["key"]: [r["tag"] for r in g["rules"]] for g in after}
+    assert "llm" in tags["sports"]
+    assert "llm" not in tags["ai"]
+
+
+@pytest.mark.asyncio
+async def test_rule_change_reclassifies_existing_articles(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["llm"])
+        await reclassify_all(session)
+        await session.commit()
+
+    counts = {r["genre"]: r["unread_count"] for r in (await client.get("/api/articles/genres")).json()}
+    assert counts == {"ai": 1}
+
+    genres = (await client.get("/api/genres")).json()
+    sports_id = next(g["id"] for g in genres if g["key"] == "sports")
+    res = await client.post("/api/genre-rules", json={"tag": "llm", "genre_id": sports_id, "is_generic": False})
+    assert res.json()["reclassified"] == 1
+
+    counts = {r["genre"]: r["unread_count"] for r in (await client.get("/api/articles/genres")).json()}
+    assert counts == {"sports": 1}
+
+
+@pytest.mark.asyncio
+async def test_delete_genre_removes_its_rules_and_reclassifies(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.services.genre_classifier import reclassify_all
+
+    async with async_session() as session:
+        feed = await _make_feed(session)
+        await _make_article(session, feed.id, "g1", ["baseball"])
+        await reclassify_all(session)
+        await session.commit()
+
+    genres = (await client.get("/api/genres")).json()
+    sports_id = next(g["id"] for g in genres if g["key"] == "sports")
+
+    res = await client.delete(f"/api/genres/{sports_id}")
+    assert res.status_code == 200
+    assert res.json()["reclassified"] == 1
+
+    counts = {r["genre"]: r["unread_count"] for r in (await client.get("/api/articles/genres")).json()}
+    assert counts == {"other": 1}
+
+
+@pytest.mark.asyncio
+async def test_patch_genre_updates_label_and_priority(client: AsyncClient) -> None:
+    genres = (await client.get("/api/genres")).json()
+    dev_id = next(g["id"] for g in genres if g["key"] == "dev")
+
+    res = await client.patch(f"/api/genres/{dev_id}", json={"label_ja": "開発", "priority": 1})
+    assert res.status_code == 200
+    assert res.json()["label_ja"] == "開発"
+
+    after = (await client.get("/api/genres")).json()
+    assert next(g for g in after if g["key"] == "dev")["priority"] == 1

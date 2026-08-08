@@ -887,6 +887,16 @@ async def regenerate_summaries(
     return {"cleared": result.rowcount or 0}
 
 
+@router.post("/articles/reclassify-genres", response_model=dict)
+async def reclassify_genres(session: AsyncSession = Depends(get_session)):
+    """辞書を直接いじった後などに全件を分類し直す。"""
+    from app.services.genre_classifier import reclassify_all
+
+    changed = await reclassify_all(session)
+    await session.commit()
+    return {"reclassified": changed}
+
+
 @router.get("/ai/status")
 async def ai_status(session: AsyncSession = Depends(get_session)):
     """Check LLM availability and background processing queue depth."""

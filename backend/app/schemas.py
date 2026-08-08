@@ -135,6 +135,42 @@ class GenreCountOut(BaseModel):
     unread_count: int
 
 
+class GenreRuleOut(BaseModel):
+    id: int
+    tag: str
+
+
+class GenreOut(BaseModel):
+    id: int
+    key: str
+    label_ja: str
+    priority: int
+    # 管理 UI がチップの削除に rule id を使うので、タグ名だけでなく id も返す
+    rules: list[GenreRuleOut] = []
+    generic_rules: list[GenreRuleOut] = []
+
+
+class GenreCreate(BaseModel):
+    key: str
+    label_ja: str
+    priority: int = 100
+
+
+class GenreUpdate(BaseModel):
+    label_ja: str | None = None
+    priority: int | None = None
+
+
+class GenreRuleCreate(BaseModel):
+    tag: str
+    genre_id: int
+    is_generic: bool = False
+
+
+class ReclassifyResult(BaseModel):
+    reclassified: int
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):
