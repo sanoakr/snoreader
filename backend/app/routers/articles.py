@@ -564,7 +564,12 @@ async def mark_all_read(
     session: AsyncSession = Depends(get_session),
 ):
     now = datetime.now(timezone.utc).isoformat()
-    stmt = select(Article).where(Article.is_read == False)  # noqa: E712
+    # 非表示記事は既読化しない（既読化すると article_cleanup の自動削除保護が外れる）。
+    # 全体 / feed_id 指定の経路もここで塞ぐ（genre 指定は下でさらに絞る）。
+    stmt = select(Article).where(
+        Article.is_read == False,  # noqa: E712
+        Article.dismissed_at.is_(None),
+    )
     if body.feed_id is not None:
         stmt = stmt.where(Article.feed_id == body.feed_id)
     if body.genre is not None:
@@ -572,7 +577,6 @@ async def mark_all_read(
         stmt = stmt.where(
             Article.genre == body.genre,
             Article.is_saved == False,  # noqa: E712
-            Article.dismissed_at.is_(None),
         )
 
     result = await session.execute(stmt)

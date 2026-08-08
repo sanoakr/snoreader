@@ -97,6 +97,35 @@ async def test_cleanup_deletes_old_unsaved_read_article(client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
+async def test_cleanup_keeps_dismissed_article(client: AsyncClient) -> None:
+    """dismissed かつ既読かつ保持期間超過の記事が cleanup で消えないこと。
+
+    非表示は既読化ではないという不変条件だが、これを破る経路（記事を開くと
+    無条件で is_read=true になる等）が実在するため、is_read=True でも
+    dismissed_at が立っていれば削除しないことをバックエンド側で保証する。
+    """
+    from app.database import async_session
+    from app.models import Article
+    from app.services.article_cleanup import cleanup_old_articles
+
+    async with async_session() as session:
+        feed = await _make_feed(session, "https://a.example.com/feed")
+        await _make_article(
+            session, feed.id, "g1", "https://news.example.com/old",
+            published_at=_iso(91), is_read=True, is_saved=False,
+            dismissed_at=_iso(1),
+        )
+        await session.commit()
+
+    async with async_session() as session:
+        deleted = await cleanup_old_articles(session)
+        assert deleted == 0
+
+        remaining = (await session.execute(select(Article))).scalars().all()
+        assert len(remaining) == 1
+
+
+@pytest.mark.asyncio
 async def test_cleanup_keeps_saved_article(client: AsyncClient) -> None:
     from app.database import async_session
     from app.models import Article

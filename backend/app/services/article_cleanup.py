@@ -2,6 +2,8 @@
 
 読み終えて保存していない記事は一時的な情報とみなし、ストレージの肥大化を
 防ぐため一定期間後に削除する。保存済み記事や未読記事は対象外。
+非表示（dismissed_at）記事も対象外— 非表示は既読化ではないため
+（`is_read` を立てる経路が別に生まれても、ここで最終防御する）。
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ async def cleanup_old_articles(session: AsyncSession) -> int:
     stmt = select(Article).where(
         Article.is_saved == False,  # noqa: E712
         Article.is_read == True,  # noqa: E712
+        Article.dismissed_at.is_(None),  # 非表示は既読化ではないので自動削除の対象にしない
         func.coalesce(Article.published_at, Article.fetched_at) < cutoff,
     )
     targets = (await session.execute(stmt)).scalars().all()
