@@ -96,6 +96,8 @@ async def lifespan(app: FastAPI):
             await conn.execute(text("ALTER TABLE articles ADD COLUMN genre TEXT"))
         if "dismissed_at" not in existing_article_cols:
             await conn.execute(text("ALTER TABLE articles ADD COLUMN dismissed_at TEXT"))
+        if "chat_suggestions" not in existing_article_cols:
+            await conn.execute(text("ALTER TABLE articles ADD COLUMN chat_suggestions TEXT"))
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_articles_genre ON articles(genre)")
         )

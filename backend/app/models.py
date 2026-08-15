@@ -65,6 +65,8 @@ class Article(Base):
     ai_summary: Mapped[str | None] = mapped_column(Text)
     ai_score: Mapped[float | None] = mapped_column(Float)
     tag_suggestions: Mapped[str | None] = mapped_column(String, nullable=True)
+    # チャットの質問候補（JSON 配列文字列）。null = 未生成、ユーザー操作で初めて作る
+    chat_suggestions: Mapped[str | None] = mapped_column(String, nullable=True)
     # null = 未試行 or 成功
     # "not_found" (404) / "forbidden" (403) / "error" (5xx/timeout/net) / "skipped"
     extract_status: Mapped[str | None] = mapped_column(String, nullable=True)

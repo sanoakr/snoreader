@@ -24,6 +24,7 @@ from app.schemas import (
     ArticleOut,
     ArticleUpdate,
     ChatSource,
+    ChatSuggestionsResponse,
     DedupRequest,
     DedupResponse,
     DismissRequest,
@@ -886,6 +887,50 @@ async def chat_about_article(
         search_used=search_used,
         sources=sources,
     )
+
+
+@router.get("/articles/{article_id}/chat-suggestions", response_model=ChatSuggestionsResponse)
+async def get_chat_suggestions(
+    article_id: int,
+    generate: bool = Query(False, description="未生成なら LLM で生成する"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Suggested follow-up questions for the article chat panel.
+
+    Cached in ``Article.chat_suggestions``. The default (``generate=false``) never
+    calls the LLM, so simply opening an article costs nothing — generation is an
+    explicit user action.
+    """
+    import json as _json
+
+    article = await session.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    if article.chat_suggestions:
+        try:
+            cached = _json.loads(article.chat_suggestions)
+        except ValueError:
+            cached = []
+        if cached:
+            return ChatSuggestionsResponse(questions=cached, generated=False)
+
+    if not generate:
+        return ChatSuggestionsResponse(questions=[], generated=False)
+
+    from app.ai.question_suggester import suggest_questions
+    from app.ai.task_queue import PRIORITY_FOREGROUND
+
+    text_source = article.content or article.ai_summary or article.summary or ""
+    questions = await suggest_questions(
+        article.title, text_source, priority=PRIORITY_FOREGROUND
+    )
+    if not questions:
+        raise HTTPException(status_code=503, detail="LLM server unavailable")
+
+    article.chat_suggestions = _json.dumps(questions, ensure_ascii=False)
+    await session.commit()
+    return ChatSuggestionsResponse(questions=questions, generated=True)
 
 
 _BULK_TAG_BATCH = 10  # max articles per batch

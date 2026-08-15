@@ -108,6 +108,26 @@ export function useChatWithArticle() {
   });
 }
 
+/** キャッシュ済みの質問候補だけを引く。未生成なら questions は空配列で返る */
+export function useChatSuggestions(articleId: number) {
+  return useQuery({
+    queryKey: ['chat-suggestions', articleId],
+    queryFn: () => api.getChatSuggestions(articleId),
+    staleTime: Infinity,
+  });
+}
+
+/** 明示操作で候補を生成し、同じクエリキーへ直接書き戻す */
+export function useGenerateChatSuggestions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.getChatSuggestions(id, true),
+    onSuccess: (result, id) => {
+      qc.setQueryData(['chat-suggestions', id], result);
+    },
+  });
+}
+
 export function useAiStatus() {
   return useQuery({
     queryKey: ['ai-status'],

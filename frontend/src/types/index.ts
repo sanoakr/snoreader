@@ -118,3 +118,9 @@ export interface ChatResponse {
   search_used: boolean;
   sources: ChatSource[];
 }
+
+export interface ChatSuggestionsResponse {
+  questions: string[];
+  /** この応答が LLM 生成によるものか（キャッシュ返却なら false） */
+  generated: boolean;
+}
