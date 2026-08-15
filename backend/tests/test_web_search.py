@@ -33,18 +33,22 @@ def test_explanation_requests_trigger(message):
 
 @pytest.mark.parametrize("message", [
     "この記事の結論は何ですか",
-    "本記事の背景を整理して",
     "記事の要約をお願いします",
-    "本文にはなぜと書いてありますか",
+    "3行でまとめてください",
 ])
-def test_article_scoped_questions_do_not_trigger(message):
-    # 記事自体への質問は、説明要求の語を含んでいても検索しない
+def test_article_restatement_requests_do_not_trigger(message):
+    # 本文の言い換えを求める質問だけは、検索しても足しにならないので抑止する
     assert needs_web_search(message) is False
+
+
+def test_article_mention_still_triggers_explanation_search(message="この記事に出てくるインド太平洋とは何ですか"):
+    # 「記事」に言及していても、記事外の説明を求めているので検索する
+    assert needs_web_search(message) is True
 
 
 def test_explicit_search_beats_article_scope_hint():
     # 明示的な検索指示は記事スコープの語より優先される
-    assert needs_web_search("この記事の背景を検索して補足して") is True
+    assert needs_web_search("この記事の要約を検索して補足して") is True
 
 
 @pytest.mark.parametrize("message", ["", "ありがとう", "もう少し詳しく"])
