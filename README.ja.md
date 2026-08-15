@@ -80,6 +80,7 @@ mlx_lm.server --model prism-ml/Ternary-Bonsai-8B-mlx-2bit --port 8880
 | `SNOREADER_LLM_BASE_URL` | `http://localhost:8880/v1` | LLM API の URL |
 | `SNOREADER_LLM_MODEL` | `default` | モデル名 |
 | `SNOREADER_LLM_TIMEOUT` | `120` | リクエストタイムアウト（秒） |
+| `SNOREADER_LLM_REASONING_EFFORT` | `none` | 推論（thinking）の強度。`none` で thinking を無効化し、品質を落とさず要約を 4〜5 倍高速化する。パラメータを解釈しないサーバでは空文字を設定する |
 | `SNOREADER_SUMMARIZE_INTERVAL_SECONDS` | `180` | バックグラウンド要約の実行間隔（秒） |
 | `SNOREADER_SUMMARIZE_BATCH_SIZE` | `5` | 1 回の要約バッチ件数 |
 

@@ -1,7 +1,8 @@
 """Combined article processor: summary + tag suggestions in a single LLM call.
 
-Using a single call is required for the Gemma 4 model, which can only
-generate tag pairs reliably when it continues from a SUMMARY section it just wrote.
+Using a single call is required for the local model (established with Gemma 4,
+kept for the current Qwen3.8 27B), which can only generate tag pairs reliably
+when it continues from a SUMMARY section it just wrote.
 """
 
 from __future__ import annotations

@@ -30,12 +30,15 @@ async def chat_completion(
     if priority is None:
         priority = PRIORITY_BACKGROUND
 
-    payload = {
+    payload: dict = {
         "model": settings.llm_model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+    # 空文字は「サーバが解釈できないので送らない」の意（app/config.py 参照）
+    if settings.llm_reasoning_effort:
+        payload["reasoning_effort"] = settings.llm_reasoning_effort
 
     async def _call() -> str | None:
         try:
