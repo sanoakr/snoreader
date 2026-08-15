@@ -15,7 +15,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - AI summary auto-generation (background job, Japanese bullet points)
 - AI tag suggestions — existing-tag keyword match (title / body, Unicode-safe) merged with LLM candidates
 - Auto-tag on save — when a previously untagged article is starred, matching existing tags are attached automatically (capped at 3 per article). Bulk re-run from the sidebar ⚙ menu (`Auto tag`) also re-tags Saved articles that already have 4 or more tags (old tags are stripped and rebuilt)
-- Article-scoped LLM chat panel with optional DuckDuckGo web search (triggered by keywords like "検索", "最新", "調べて")
+- Article-scoped LLM chat panel that answers from the article, DuckDuckGo web search, and general knowledge
 - IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags (coverage ≥ 30%) and a score floor to suppress weak single-tag matches
 - "Unrecommend" view — unread articles with zero saved-tag overlap (sidebar order: All / Recommend / Unrecommend / Saved)
 - Genre triage for the unread backlog — every article is assigned exactly one genre by a deterministic tag→genre dictionary (no LLM, so a genre is a complete set you can act on in bulk). The sidebar lists genres with unread counts; picking one enables **まとめて既読** and **まとめて非表示** for the whole genre, with a confirmation and an inline undo
@@ -94,7 +94,9 @@ When the LLM server is available, SnoReader:
 
 ### Chat web search
 
-When a chat message contains a trigger word (`検索`, `調べて`, `search`, `最新`, `latest`, or a "今…？" question), the backend runs a DuckDuckGo search via `ddgs`, injects the top 3 results into the LLM context, and returns source links alongside the reply. Search failures or timeouts fall back silently to article-only answers.
+The article is the chat's primary context, but the assistant may also answer from web search results and its own general knowledge, marking anything that comes from outside the article as such.
+
+A DuckDuckGo search via `ddgs` runs when the message contains an explicit search instruction (`検索`, `調べて`, `search`), a recency keyword (`最新`, `latest`, or a "今…？" question), or an explanation request (`とは`, `意味`, `背景`, `経緯`, `違い`, `なぜ`, `理由`, `what is`, `why`, `explain`, …). Requests that only restate the article (`要約`, `まとめて`, `結論`) skip the search to avoid the added latency, unless an explicit search instruction is also present. The top 3 results are injected into the LLM context and their source links are returned alongside the reply. Search failures or timeouts fall back silently to article-and-knowledge answers.
 
 ## Production
 
