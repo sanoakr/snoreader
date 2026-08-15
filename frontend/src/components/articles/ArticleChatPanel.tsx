@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useChatWithArticle } from '../../hooks/useArticles';
+import { useChatSuggestions, useChatWithArticle, useGenerateChatSuggestions } from '../../hooks/useArticles';
 import { Spinner } from '../common/Spinner';
 import type { ChatMessage, ChatSource } from '../../types';
 
@@ -34,6 +34,8 @@ export function ArticleChatPanel({ articleId }: Props) {
   const [pendingIsSearch, setPendingIsSearch] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const chat = useChatWithArticle();
+  const suggestions = useChatSuggestions(articleId);
+  const generateSuggestions = useGenerateChatSuggestions();
 
   useEffect(() => {
     setHistory([]);
@@ -46,8 +48,9 @@ export function ArticleChatPanel({ articleId }: Props) {
     historyRef.current?.scrollTo({ top: historyRef.current.scrollHeight, behavior: 'smooth' });
   }, [history.length, chat.isPending]);
 
-  const send = () => {
-    const message = input.trim();
+  // override は質問候補チップから直接送るときに渡す
+  const send = (override?: string) => {
+    const message = (override ?? input).trim();
     if (!message || chat.isPending) return;
     const userMsg: UserEntry = { role: 'user', content: message };
     const nextHistory: Entry[] = [...history, userMsg];
@@ -77,6 +80,12 @@ export function ArticleChatPanel({ articleId }: Props) {
       },
     );
   };
+
+  const questions = suggestions.data?.questions ?? [];
+  // 生成ミューテーションは記事をまたいで生き残るので、この記事の分だけを見る
+  const genForThisArticle = generateSuggestions.variables === articleId;
+  const genPending = generateSuggestions.isPending && genForThisArticle;
+  const genError = generateSuggestions.isError && genForThisArticle;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -137,6 +146,43 @@ export function ArticleChatPanel({ articleId }: Props) {
             )}
             {error && (
               <div className="text-xs text-red-500 px-1">{error}</div>
+            )}
+          </div>
+        )}
+        {history.length === 0 && !chat.isPending && (
+          <div className="flex flex-wrap items-center gap-1.5 px-2 pt-2">
+            {questions.length > 0 ? (
+              questions.map((q, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => send(q)}
+                  className="px-2.5 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+                >
+                  {q}
+                </button>
+              ))
+            ) : suggestions.isLoading ? null : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => generateSuggestions.mutate(articleId)}
+                  disabled={genPending}
+                  className="px-2.5 py-1 text-xs rounded-full border border-dashed border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {genPending ? (
+                    <>
+                      <Spinner size="sm" />
+                      候補を考え中...
+                    </>
+                  ) : (
+                    '✨ 質問候補を生成'
+                  )}
+                </button>
+                {genError && (
+                  <span className="text-xs text-red-500">候補を生成できませんでした</span>
+                )}
+              </>
             )}
           </div>
         )}

@@ -16,6 +16,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - AI tag suggestions — existing-tag keyword match (title / body, Unicode-safe) merged with LLM candidates
 - Auto-tag on save — when a previously untagged article is starred, matching existing tags are attached automatically (capped at 3 per article). Bulk re-run from the sidebar ⚙ menu (`Auto tag`) also re-tags Saved articles that already have 4 or more tags (old tags are stripped and rebuilt)
 - Article-scoped LLM chat panel that answers from the article, DuckDuckGo web search, and general knowledge
+- Suggested chat questions — tappable chips of short, article-specific questions above the chat input. Generated on demand with one explicit click and cached per article, so simply opening an article never costs an LLM call
 - IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags (coverage ≥ 30%) and a score floor to suppress weak single-tag matches
 - "Unrecommend" view — unread articles with zero saved-tag overlap (sidebar order: All / Recommend / Unrecommend / Saved)
 - Genre triage for the unread backlog — every article is assigned exactly one genre by a deterministic tag→genre dictionary (no LLM, so a genre is a complete set you can act on in bulk). The sidebar lists genres with unread counts; picking one enables **まとめて既読** and **まとめて非表示** for the whole genre, with a confirmation and an inline undo
@@ -92,6 +93,12 @@ When the LLM server is available, SnoReader:
 - Auto-translates manually entered Japanese tags into English
 - Enables a chat panel at the bottom of the reader pane for free-form questions about the current article (session-only history, cleared on article switch)
 
+### Suggested chat questions
+
+Above the chat input, SnoReader shows up to 4 short question chips tailored to the current article; clicking one sends it as the next message.
+
+Suggestions are cached in `articles.chat_suggestions` and served by `GET /api/articles/{id}/chat-suggestions`. That endpoint never calls the LLM by default — opening an article only reads the cache. When nothing is cached the panel shows a **✨ 質問候補を生成** button instead, and only that click issues the request with `?generate=true`. Generation takes roughly 8 seconds against a warm local model and is stored, so the chips are instant on every later visit.
+
 ### Chat web search
 
 The article is the chat's primary context, but the assistant may also answer from web search results and its own general knowledge, marking anything that comes from outside the article as such.
@@ -152,6 +159,7 @@ snoreader/
 │       └── ai/
 │           ├── llm_client.py     #   OpenAI-compatible LLM client
 │           ├── summarizer.py     #   article summarization
+│           ├── question_suggester.py # chat question suggestions
 │           └── tagger.py         #   bilingual tag suggestion
 ├── frontend/
 │   └── src/

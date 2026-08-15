@@ -210,3 +210,9 @@ class ArticleChatResponse(BaseModel):
     message: str
     search_used: bool = False
     sources: list[ChatSource] = []
+
+
+class ChatSuggestionsResponse(BaseModel):
+    questions: list[str] = []
+    # この呼び出しで LLM を叩いたか（キャッシュ返却なら False）
+    generated: bool = False

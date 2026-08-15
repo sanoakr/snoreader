@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ChatSuggestionsResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -206,6 +206,14 @@ export function chatWithArticle(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, history }),
   });
+}
+
+/** generate=false（既定）はキャッシュ参照のみで LLM を呼ばない */
+export function getChatSuggestions(
+  id: number,
+  generate = false,
+): Promise<ChatSuggestionsResponse> {
+  return fetchJSON(`${BASE}/articles/${id}/chat-suggestions?generate=${generate}`);
 }
 
 export interface AiStatus {
