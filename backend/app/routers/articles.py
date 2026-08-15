@@ -822,7 +822,9 @@ _CHAT_SYSTEM_PROMPT = (
     "- Do NOT output template headers like 'SUMMARY:', 'TAGS:', or similar.\n"
     "- Do NOT start lines with '・', '-', '*', or numbered markers.\n"
     "- Answer in the user's language (Japanese if the user writes in Japanese).\n"
-    "- Keep answers concise — 1-3 short paragraphs maximum."
+    # 生成トークン数が応答時間をそのまま決める（プロンプト長はほぼ効かない）。
+    # 1-3 段落 = 200-300 tok で約 9 秒かかっていたのを、2-4 文 = 130 tok 前後に絞って半減させる
+    "- Keep answers to 2-4 sentences. Only go longer if the user explicitly asks for detail."
 )
 _CHAT_CONTEXT_LIMIT = 4000  # 記事本文をプロンプトに埋め込む際の文字数上限
 _CHAT_HISTORY_LIMIT = 10    # クライアント履歴の最大保持ターン数
