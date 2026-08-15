@@ -20,6 +20,18 @@ _ALWAYS_TRIGGERS = (
 _RECENCY_TRIGGERS = (
     "最新", "latest",
 )
+# トリガー語: 記事本文の外にある説明・背景を求める言い回し。
+# 「〜とは？」のような自然な質問でも検索が走るようにするためのもので、
+# 記事の中に答えがある場合は検索結果が使われないだけなので誤発火は害が小さい。
+_EXPLAIN_TRIGGERS = (
+    "とは", "どういう意味", "意味は", "意味を", "背景", "経緯", "違い", "なぜ", "理由",
+    "what is", "who is", "why", "difference", "explain", "background",
+)
+# 記事そのものについて尋ねていることが明らかな語。検索を抑止して無駄な待ち時間を避ける。
+# _ALWAYS_TRIGGERS（明示的な検索指示）はこれより優先される。
+_ARTICLE_SCOPE_HINTS = (
+    "この記事", "本記事", "記事の", "記事に", "本文", "要約", "まとめて",
+)
 # 「今...?」「今の...?」などの疑問文パターン
 # 誤検知回避のため、語尾に ? / ？ があるときだけ発火する
 _NOW_PATTERN = re.compile(
@@ -33,11 +45,17 @@ def needs_web_search(message: str) -> bool:
     if not message:
         return False
     lower = message.lower()
+    # 明示的な検索指示は他の判定より常に優先する
     if any(t in lower for t in _ALWAYS_TRIGGERS):
         return True
     if any(t in lower for t in _RECENCY_TRIGGERS):
         return True
     if _NOW_PATTERN.search(message):
+        return True
+    # 記事自体への質問なら検索しない（説明要求の語を含んでいても）
+    if any(h in message for h in _ARTICLE_SCOPE_HINTS):
+        return False
+    if any(t in lower for t in _EXPLAIN_TRIGGERS):
         return True
     return False
 
