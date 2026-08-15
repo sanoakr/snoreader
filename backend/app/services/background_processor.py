@@ -7,8 +7,8 @@ loops on the task_queue "bulk" lane, and one Phase 2 (tag backfill) loop on the
 why this split exists (slab-llm's Ollama backend handles a couple of concurrent
 chat completions well but foreground responsiveness still needs a guaranteed-free lane).
 
-Uses a single combined LLM call (summarize_and_tag) because the Gemma 4
-model can only generate tag pairs reliably as part of a structured SUMMARY+TAGS output.
+Uses a single combined LLM call (summarize_and_tag) because the local model
+can only generate tag pairs reliably as part of a structured SUMMARY+TAGS output.
 """
 from __future__ import annotations
 
