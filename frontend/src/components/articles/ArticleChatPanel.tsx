@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useChatSuggestions, useChatWithArticle, useGenerateChatSuggestions } from '../../hooks/useArticles';
+import { useChatSuggestions, useChatWithArticle, useGenerateChatSuggestions, useRefreshChatSuggestions } from '../../hooks/useArticles';
 import { Spinner } from '../common/Spinner';
 import type { ChatMessage, ChatSource } from '../../types';
 
@@ -32,24 +32,30 @@ export function ArticleChatPanel({ articleId }: Props) {
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pendingIsSearch, setPendingIsSearch] = useState(false);
+  // 会話を踏まえて差し替えた候補。null のあいだは記事単位のキャッシュを出す
+  const [followupQuestions, setFollowupQuestions] = useState<string[] | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const chat = useChatWithArticle();
   const suggestions = useChatSuggestions(articleId);
   const generateSuggestions = useGenerateChatSuggestions();
+  const refreshSuggestions = useRefreshChatSuggestions();
 
   useEffect(() => {
     setHistory([]);
     setInput('');
     setError(null);
     setPendingIsSearch(false);
+    setFollowupQuestions(null);
   }, [articleId]);
 
   useEffect(() => {
     historyRef.current?.scrollTo({ top: historyRef.current.scrollHeight, behavior: 'smooth' });
   }, [history.length, chat.isPending]);
 
-  // override は質問候補チップから直接送るときに渡す
+  // override は質問候補チップから直接送るときに渡す。
+  // 候補を作り直すのはチップ経由のときだけ（手入力では今の候補を出したままにする）
   const send = (override?: string) => {
+    const fromChip = override !== undefined;
     const message = (override ?? input).trim();
     if (!message || chat.isPending) return;
     const userMsg: UserEntry = { role: 'user', content: message };
@@ -68,8 +74,20 @@ export function ArticleChatPanel({ articleId }: Props) {
             content: res.message,
             sources: res.search_used ? res.sources : undefined,
           };
-          setHistory([...nextHistory, assistant]);
+          const doneHistory: Entry[] = [...nextHistory, assistant];
+          setHistory(doneHistory);
           setPendingIsSearch(false);
+          if (fromChip) {
+            refreshSuggestions.mutate(
+              {
+                id: articleId,
+                history: doneHistory.map(h => ({ role: h.role, content: h.content })),
+              },
+              // 失敗しても今の候補を出したままにする。回答は既に出ているので、
+              // ここでエラーを見せても操作の妨げになるだけ
+              { onSuccess: (res) => setFollowupQuestions(res.questions) },
+            );
+          }
         },
         onError: (e) => {
           setHistory(history);
@@ -81,11 +99,13 @@ export function ArticleChatPanel({ articleId }: Props) {
     );
   };
 
-  const questions = suggestions.data?.questions ?? [];
+  const questions = followupQuestions ?? suggestions.data?.questions ?? [];
   // 生成ミューテーションは記事をまたいで生き残るので、この記事の分だけを見る
   const genForThisArticle = generateSuggestions.variables === articleId;
   const genPending = generateSuggestions.isPending && genForThisArticle;
   const genError = generateSuggestions.isError && genForThisArticle;
+  const refreshPending =
+    refreshSuggestions.isPending && refreshSuggestions.variables?.id === articleId;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -149,19 +169,28 @@ export function ArticleChatPanel({ articleId }: Props) {
             )}
           </div>
         )}
-        {history.length === 0 && !chat.isPending && (
+        {!chat.isPending && (
           <div className="flex flex-wrap items-center gap-1.5 px-2 pt-2">
             {questions.length > 0 ? (
-              questions.map((q, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => send(q)}
-                  className="px-2.5 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
-                >
-                  {q}
-                </button>
-              ))
+              <>
+                {questions.map((q, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => send(q)}
+                    className="px-2.5 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+                {/* 生成中も古いチップは消さない（消すと行が空いて画面がガタつく） */}
+                {refreshPending && (
+                  <span className="flex items-center gap-1.5 px-1 text-xs text-gray-400 dark:text-gray-500">
+                    <Spinner size="sm" />
+                    候補を更新中...
+                  </span>
+                )}
+              </>
             ) : suggestions.isLoading ? null : (
               <>
                 <button

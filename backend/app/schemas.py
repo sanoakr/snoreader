@@ -216,3 +216,7 @@ class ChatSuggestionsResponse(BaseModel):
     questions: list[str] = []
     # この呼び出しで LLM を叩いたか（キャッシュ返却なら False）
     generated: bool = False
+
+
+class ChatFollowupRequest(BaseModel):
+    history: list[ChatMessage] = []

@@ -23,6 +23,7 @@ from app.schemas import (
     ArticleDetail,
     ArticleOut,
     ArticleUpdate,
+    ChatFollowupRequest,
     ChatSource,
     ChatSuggestionsResponse,
     DedupRequest,
@@ -930,6 +931,37 @@ async def get_chat_suggestions(
 
     article.chat_suggestions = _json.dumps(questions, ensure_ascii=False)
     await session.commit()
+    return ChatSuggestionsResponse(questions=questions, generated=True)
+
+
+@router.post("/articles/{article_id}/chat-suggestions", response_model=ChatSuggestionsResponse)
+async def refresh_chat_suggestions(
+    article_id: int,
+    body: ChatFollowupRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Next questions to ask, given the conversation so far.
+
+    Deliberately **not** cached on the article: these depend on the conversation,
+    and storing them would make ``chat_suggestions`` — the per-article opening
+    questions served by the GET above — reflect one reader's chat session.
+    """
+    article = await session.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    from app.ai.question_suggester import suggest_followup_questions
+    from app.ai.task_queue import PRIORITY_FOREGROUND
+
+    text_source = article.content or article.ai_summary or article.summary or ""
+    questions = await suggest_followup_questions(
+        article.title,
+        text_source,
+        [m.model_dump() for m in body.history],
+        priority=PRIORITY_FOREGROUND,
+    )
+    if not questions:
+        raise HTTPException(status_code=503, detail="LLM server unavailable")
     return ChatSuggestionsResponse(questions=questions, generated=True)
 
 
