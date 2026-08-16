@@ -99,6 +99,15 @@ When the LLM server is available, SnoReader:
 
 This is needed because `SNOREADER_LLM_REASONING_EFFORT=none` tells Ollama not to *parse* thinking, not merely not to request it. When the model thinks anyway — measured at 11 of 24 replies for `qwen3.8:27b-mlx` on a long article with chat history — the reasoning text and its closing `</think>` land in the message body. The opening tag is injected by the chat template rather than generated, so the shape is `<draft>…</think><answer>` with no `<think>` at all, which is why the split is on the closing tag. Summaries and tags never showed this because `finalize_bullets` and the tag regex discard anything unstructured; chat and question suggestions pass the text straight through.
 
+### Runaway repetition
+
+The model occasionally answers correctly and then repeats itself verbatim until it exhausts `max_tokens` (observed at 10001 characters with `finish_reason: "length"`), in two shapes: a single sentence repeating, and a two-paragraph A/B/A/B cycle. Two guards:
+
+- The chat endpoint sends `frequency_penalty` (0.5). It is passed per call rather than set globally, because summaries repeat `・` and tag output repeats `|` and `,` by design — penalising repeated tokens everywhere would damage those structured formats.
+- `llm_client` cuts a repeating cycle back to one occurrence before returning. The loop always runs to the end of the message (that is what exhausts the budget), so the repetition is always a suffix and cutting it is safe. Blank lines are ignored when matching, since the observed loops put one between each repeat.
+
+The penalty makes the loop rarer; the cut makes it invisible when it still happens.
+
 ### Suggested chat questions
 
 Above the chat input, SnoReader shows up to 4 short question chips tailored to the current article; clicking one sends it as the next message.
