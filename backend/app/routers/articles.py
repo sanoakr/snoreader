@@ -1091,6 +1091,11 @@ async def ai_status(session: AsyncSession = Depends(get_session)):
             Article.ai_summary.isnot(None), Article.tag_suggestions.is_(None)
         )
     )
+    pending_questions = await session.scalar(
+        select(func.count()).select_from(Article).where(
+            Article.ai_summary.isnot(None), Article.chat_suggestions.is_(None)
+        )
+    )
     return {
         "available": available,
         "base_url": settings.llm_base_url,
@@ -1098,6 +1103,7 @@ async def ai_status(session: AsyncSession = Depends(get_session)):
         "queue_depth": queue_depth(),
         "pending_summary": pending_summary,
         "pending_tags": pending_tags,
+        "pending_questions": pending_questions,
     }
 
 

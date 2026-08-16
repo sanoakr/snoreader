@@ -4,8 +4,10 @@ Two independent lanes run concurrently against the LLM backend (slab-llm's Ollam
 was measured 2026-07-25 to handle ~2 concurrent chat completions at ~2x the
 throughput of one at a time — see git history for the benchmark):
 
-- "bulk": background_processor's Phase 1 (combined summarize+tag) calls only.
-  2 workers, so up to 2 articles are summarized concurrently.
+- "bulk": background_processor's Phase 1 (combined summarize+tag) and Phase 3
+  (chat question suggestions) calls. 2 workers, so up to 2 articles are
+  processed concurrently. Phase 3 runs at PRIORITY_IDLE so it only ever uses
+  capacity Phase 1 is not asking for.
 - "reserved": everything else — foreground (user-triggered) calls and Phase 2
   (tag-only backfill). 1 worker, so foreground requests always have a lane
   free instead of queuing behind the 2 bulk workers; Phase 2 uses this lane
@@ -23,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 PRIORITY_FOREGROUND = 0
 PRIORITY_BACKGROUND = 10
+# 先回り生成専用の最低優先度。要約バックログ (PRIORITY_BACKGROUND) が残っている限り
+# 必ずそちらが先に処理されるので、質問候補の生成が要約の完了を遅らせない。
+PRIORITY_IDLE = 20
 
 Lane = Literal["bulk", "reserved"]
 _LANE_WORKERS: dict[Lane, int] = {"bulk": 2, "reserved": 1}

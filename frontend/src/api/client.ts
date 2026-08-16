@@ -234,6 +234,7 @@ export interface AiStatus {
   running: boolean;
   pending_summary: number;
   pending_tags: number;
+  pending_questions: number;
 }
 
 export function getAiStatus(): Promise<AiStatus> {
