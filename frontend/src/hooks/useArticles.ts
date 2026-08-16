@@ -128,6 +128,17 @@ export function useGenerateChatSuggestions() {
   });
 }
 
+/**
+ * 会話を踏まえた次の候補。記事単位のキャッシュ（['chat-suggestions', id]）は
+ * 開いた直後の候補用なので、ここでは書き戻さず呼び出し側の state に載せる
+ */
+export function useRefreshChatSuggestions() {
+  return useMutation({
+    mutationFn: ({ id, history }: { id: number; history: ChatMessage[] }) =>
+      api.refreshChatSuggestions(id, history),
+  });
+}
+
 export function useAiStatus() {
   return useQuery({
     queryKey: ['ai-status'],

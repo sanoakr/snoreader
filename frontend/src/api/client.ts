@@ -216,6 +216,18 @@ export function getChatSuggestions(
   return fetchJSON(`${BASE}/articles/${id}/chat-suggestions?generate=${generate}`);
 }
 
+/** 会話を踏まえた次の候補。会話依存なのでサーバ側にキャッシュされない */
+export function refreshChatSuggestions(
+  id: number,
+  history: ChatMessage[],
+): Promise<ChatSuggestionsResponse> {
+  return fetchJSON(`${BASE}/articles/${id}/chat-suggestions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ history }),
+  });
+}
+
 export interface AiStatus {
   available: boolean;
   base_url: string;

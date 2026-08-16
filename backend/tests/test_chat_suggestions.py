@@ -202,3 +202,88 @@ async def test_generate_true_returns_503_when_llm_unavailable(
 async def test_unknown_article_returns_404(client: AsyncClient) -> None:
     res = await client.get("/api/articles/999/chat-suggestions")
     assert res.status_code == 404
+
+
+# --- 追随候補（会話を踏まえた更新） -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_followup_prompt_includes_conversation(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """直前のやり取りがプロンプトに載ること（載らなければ「次の」質問にならない）。"""
+    captured: list[dict[str, str]] = []
+
+    async def _fake_chat(messages, **kwargs):
+        captured.extend(messages)
+        return "・追加の質問は？"
+
+    monkeypatch.setattr("app.ai.question_suggester.chat_completion", _fake_chat)
+
+    res = await client.post(
+        "/api/articles/1/chat-suggestions",
+        json={
+            "history": [
+                {"role": "user", "content": "量子化の影響は？"},
+                {"role": "assistant", "content": "精度低下は1%未満です。"},
+            ]
+        },
+    )
+    assert res.status_code == 200
+    assert res.json() == {"questions": ["追加の質問は？"], "generated": True}
+
+    prompt = "\n".join(m["content"] for m in captured)
+    assert "量子化の影響は？" in prompt
+    assert "精度低下は1%未満です。" in prompt
+
+
+@pytest.mark.asyncio
+async def test_followup_does_not_overwrite_cached_suggestions(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """会話依存の候補で記事単位のキャッシュを汚さないこと。"""
+
+    async def _fake_chat(messages, **kwargs):
+        return "・会話由来の質問は？"
+
+    monkeypatch.setattr("app.ai.question_suggester.chat_completion", _fake_chat)
+
+    res = await client.post(
+        "/api/articles/1/chat-suggestions",
+        json={"history": [{"role": "user", "content": "何か質問"}]},
+    )
+    assert res.status_code == 200
+    assert res.json()["questions"] == ["会話由来の質問は？"]
+
+    from app.database import async_session
+    from app.models import Article
+
+    async with async_session() as session:
+        article = await session.get(Article, 1)
+        assert article is not None
+        assert article.chat_suggestions == '["保存済みの質問は？"]'
+
+
+@pytest.mark.asyncio
+async def test_followup_returns_503_when_llm_unavailable(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _no_llm(messages, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.ai.question_suggester.chat_completion", _no_llm)
+
+    res = await client.post(
+        "/api/articles/1/chat-suggestions",
+        json={"history": [{"role": "user", "content": "何か質問"}]},
+    )
+    assert res.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_followup_unknown_article_returns_404(client: AsyncClient) -> None:
+    res = await client.post(
+        "/api/articles/999/chat-suggestions",
+        json={"history": [{"role": "user", "content": "何か質問"}]},
+    )
+    assert res.status_code == 404
