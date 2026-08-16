@@ -9,6 +9,32 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+_THINK_CLOSE = "</think>"
+_THINK_OPEN = "<think>"
+
+
+def _strip_thinking(content: str) -> str | None:
+    """Drop a thinking block the server left in the message body.
+
+    ``reasoning_effort="none"`` tells Ollama not to parse thinking, so when the
+    model thinks anyway (measured at roughly 1 reply in 4 for qwen3.8) the
+    reasoning text and its closing tag land in ``content``. The opening tag is
+    injected by the chat template rather than generated, so the observed shape is
+    ``<draft>…</think><answer>`` with no ``<think>`` at all — hence splitting on
+    the closing tag rather than matching a pair.
+
+    Returns None when nothing usable is left (the reply was cut off mid-thinking).
+    """
+    if _THINK_CLOSE in content:
+        # 最後の閉じタグを採る。思考が複数ブロックに分かれても回答だけが残る
+        logger.debug("stripped a thinking block from the LLM response")
+        content = content.rsplit(_THINK_CLOSE, 1)[1]
+    elif _THINK_OPEN in content:
+        # 開いたまま閉じていない = max_tokens 等で思考の途中で切れており回答がない
+        return None
+    stripped = content.strip()
+    return stripped or None
+
 
 async def chat_completion(
     messages: list[dict[str, str]],
@@ -49,7 +75,10 @@ async def chat_completion(
                 )
                 resp.raise_for_status()
                 data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            if content is None:
+                return None
+            return _strip_thinking(content)
         except httpx.ConnectError:
             logger.debug("LLM server not available at %s", settings.llm_base_url)
             return None

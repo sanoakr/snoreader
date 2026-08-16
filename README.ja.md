@@ -81,7 +81,7 @@ mlx_lm.server --model prism-ml/Ternary-Bonsai-8B-mlx-2bit --port 8880
 | `SNOREADER_LLM_BASE_URL` | `http://localhost:8880/v1` | LLM API の URL |
 | `SNOREADER_LLM_MODEL` | `default` | モデル名 |
 | `SNOREADER_LLM_TIMEOUT` | `120` | リクエストタイムアウト（秒） |
-| `SNOREADER_LLM_REASONING_EFFORT` | `none` | 推論（thinking）の強度。`none` で thinking を無効化し、品質を落とさず要約を 4〜5 倍高速化する。パラメータを解釈しないサーバでは空文字を設定する |
+| `SNOREADER_LLM_REASONING_EFFORT` | `none` | 推論（thinking）の強度。`none` で thinking を無効化し、品質を落とさず要約を 4〜5 倍高速化する。パラメータを解釈しないサーバでは空文字を設定する。なお `none` はサーバ側の thinking *解析* も止めるため、モデルが指示に反して思考すると本文に混入する。SnoReader は `llm_client` でこれを除去する（後述） |
 | `SNOREADER_SUMMARIZE_INTERVAL_SECONDS` | `180` | バックグラウンド要約の実行間隔（秒） |
 | `SNOREADER_SUMMARIZE_BATCH_SIZE` | `5` | 1 回の要約バッチ件数 |
 
@@ -90,6 +90,12 @@ LLM サーバーが利用可能な場合、SnoReader は以下を自動実行す
 - AI 要約をもとにタグを提案
 - 手動入力された日本語タグを英語に自動翻訳
 - リーダーペイン下部のチャットパネルで記事に関する自由質問を受け付け（セッション内履歴のみ、記事切替でクリア）
+
+### thinking ブロックの除去
+
+`llm_client.chat_completion` は、サーバが本文に残した thinking ブロックを取り除いてから返す。思考の途中で切れていて回答が残らない場合は何も返さない。
+
+`SNOREADER_LLM_REASONING_EFFORT=none` は「thinking を要求しない」だけでなく Ollama 側の thinking *解析* も止めるため、この処理が要る。モデルが指示に反して思考すると（`qwen3.8:27b-mlx` で長い記事＋会話履歴のとき 24 回中 11 回で実測）、思考本文と閉じタグ `</think>` が本文に落ちてくる。開始タグはチャットテンプレートが注入するもので生成されないため、実際の形は `<下書き>…</think><回答>` と開始タグを欠く。閉じタグで分割しているのはこのため。要約とタグでこれが表面化しなかったのは、`finalize_bullets` とタグの正規表現が構造に合わない文字列を捨てるからで、チャットと質問候補だけが素通しだった。
 
 ### チャットの質問候補
 
