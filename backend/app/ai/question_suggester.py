@@ -92,6 +92,7 @@ async def suggest_questions(
     title: str,
     text: str,
     priority: int | None = None,
+    lane: str = "reserved",
 ) -> list[str]:
     """Generate follow-up question suggestions for an article.
 
@@ -109,7 +110,9 @@ async def suggest_questions(
             ),
         },
     ]
-    result = await chat_completion(messages, max_tokens=512, temperature=0.4, priority=priority)
+    result = await chat_completion(
+        messages, max_tokens=512, temperature=0.4, priority=priority, lane=lane
+    )
     if not result:
         return []
     return _parse_questions(result)

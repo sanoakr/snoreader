@@ -204,6 +204,23 @@ async def test_unknown_article_returns_404(client: AsyncClient) -> None:
     assert res.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_ai_status_reports_pending_questions(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 3 の残件数（要約済み・候補未生成）を AI ステータスに出すこと。"""
+
+    async def _unavailable() -> bool:
+        return False
+
+    monkeypatch.setattr("app.ai.llm_client.is_available", _unavailable)
+
+    res = await client.get("/api/ai/status")
+    assert res.status_code == 200
+    # 記事1 は候補済み、記事2 は要約のみ → 残 1 件
+    assert res.json()["pending_questions"] == 1
+
+
 # --- 追随候補（会話を踏まえた更新） -------------------------------------
 
 

@@ -52,6 +52,14 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const { data: extractFailed } = useExtractFailed();
   const extractFailedCount = extractFailed?.length ?? 0;
   const { data: genreCounts } = useGenreCounts();
+  // 残件のある種別だけを並べる（3 種すべてを条件式で繋ぐと区切りの制御が破綻するため）
+  const aiPendingLabel = [
+    aiStatus?.pending_summary ? `要約 ${aiStatus.pending_summary}件` : null,
+    aiStatus?.pending_tags ? `タグ ${aiStatus.pending_tags}件` : null,
+    aiStatus?.pending_questions ? `質問候補 ${aiStatus.pending_questions}件` : null,
+  ]
+    .filter(Boolean)
+    .join(' / ');
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -528,14 +536,12 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         )}
         <input ref={opmlFileRef} type="file" accept=".opml,.xml" onChange={handleOpmlImport} className="hidden" />
         <input ref={articlesFileRef} type="file" accept=".json" onChange={handleArticlesImport} className="hidden" />
-        {aiStatus && (aiStatus.pending_summary > 0 || aiStatus.pending_tags > 0) && (
+        {aiStatus && aiPendingLabel && (
           <div className="mt-2 px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
             {aiStatus.available && <Spinner size="sm" />}
             <span>
               {aiStatus.available ? 'AI処理中' : 'AI待機中'}{' — '}
-              {aiStatus.pending_summary > 0 && `要約 ${aiStatus.pending_summary}件`}
-              {aiStatus.pending_summary > 0 && aiStatus.pending_tags > 0 && ' / '}
-              {aiStatus.pending_tags > 0 && `タグ ${aiStatus.pending_tags}件`}
+              {aiPendingLabel}
             </span>
           </div>
         )}

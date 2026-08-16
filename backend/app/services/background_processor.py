@@ -2,9 +2,10 @@
 
 Replaces the APScheduler-based _summarize_job. Runs as persistent asyncio tasks:
 one Phase 0 (extraction) loop, _PHASE1_WORKERS concurrent Phase 1 (summary+tags)
-loops on the task_queue "bulk" lane, and one Phase 2 (tag backfill) loop on the
-"reserved" lane shared with foreground requests — see app/ai/task_queue.py for
-why this split exists (slab-llm's Ollama backend handles a couple of concurrent
+loops on the task_queue "bulk" lane, one Phase 2 (tag backfill) loop on the
+"reserved" lane shared with foreground requests, and one Phase 3 (chat question
+suggestions) loop back on the "bulk" lane at PRIORITY_IDLE — see app/ai/task_queue.py
+for why this split exists (slab-llm's Ollama backend handles a couple of concurrent
 chat completions well but foreground responsiveness still needs a guaranteed-free lane).
 
 Uses a single combined LLM call (summarize_and_tag) because the local model
@@ -250,6 +251,65 @@ async def _process_phase2_one() -> bool:
     return True
 
 
+async def _process_phase3_one() -> bool:
+    """Phase 3: pre-generate chat question suggestions for one summarized article.
+
+    Runs on the "bulk" lane at PRIORITY_IDLE, so it only consumes capacity that
+    Phase 1 is not asking for. Ordering puts unread first (chat is opened on
+    articles the user has not read yet), then saved, then newest.
+    """
+    import json as _json
+
+    from app.ai.question_suggester import suggest_questions
+    from app.ai.task_queue import PRIORITY_IDLE
+    from app.database import async_session
+    from app.models import Article
+
+    now = time.monotonic()
+    skip_ids = [aid for aid, until in _llm_skip_until.items() if until > now]
+
+    async with async_session() as session:
+        stmt = select(Article).where(
+            Article.ai_summary.isnot(None), Article.chat_suggestions.is_(None)
+        )
+        if skip_ids:
+            stmt = stmt.where(Article.id.not_in(skip_ids))
+        stmt = stmt.order_by(
+            Article.is_read.asc(), Article.is_saved.desc(), Article.published_at.desc()
+        ).limit(1)
+        article = (await session.execute(stmt)).scalars().first()
+        if not article:
+            return False
+        article_id = article.id
+        title = article.title
+        text = article.content or article.ai_summary or article.summary or ""
+
+    try:
+        questions = await suggest_questions(
+            title, text, priority=PRIORITY_IDLE, lane="bulk"
+        )
+    except Exception as e:
+        logger.warning("LLM call failed (phase 3, article %d): %s", article_id, e)
+        _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        return True
+
+    if not questions:
+        # 空を保存すると「生成済み」と区別できなくなるので書かずに backoff する。
+        # UI 側は候補が空のあいだ「質問候補を生成」ボタンを出したままにする。
+        _llm_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        return True
+
+    async with async_session() as session:
+        article = await session.get(Article, article_id)
+        if not article:
+            return True
+        article.chat_suggestions = _json.dumps(questions, ensure_ascii=False)
+        await session.commit()
+
+    logger.debug("Phase3 processed article %d: %s", article_id, title[:50])
+    return True
+
+
 async def _extract_loop() -> None:
     """Phase 0: content extraction. LLM-independent, runs on its own."""
     while True:
@@ -297,6 +357,23 @@ async def _phase2_loop() -> None:
             await asyncio.sleep(_SLEEP_IDLE)
 
 
+async def _phase3_loop() -> None:
+    from app.ai.llm_client import is_available
+
+    while True:
+        try:
+            if not await is_available():
+                await asyncio.sleep(_SLEEP_IDLE * 3)
+                continue
+            if not await _process_phase3_one():
+                await asyncio.sleep(_SLEEP_IDLE)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Background processor (phase3) unexpected error: %s", e)
+            await asyncio.sleep(_SLEEP_IDLE)
+
+
 def start() -> None:
     global _processor_tasks
     loop = asyncio.get_event_loop()
@@ -307,6 +384,7 @@ def start() -> None:
             for i in range(_PHASE1_WORKERS)
         ),
         loop.create_task(_phase2_loop(), name="background-processor-phase2"),
+        loop.create_task(_phase3_loop(), name="background-processor-phase3"),
     ]
     logger.info("Background AI processor started (%d tasks)", len(_processor_tasks))
 
