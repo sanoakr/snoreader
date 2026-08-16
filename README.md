@@ -83,7 +83,7 @@ mlx_lm.server --model prism-ml/Ternary-Bonsai-8B-mlx-2bit --port 8880
 | `SNOREADER_LLM_BASE_URL` | `http://localhost:8880/v1` | LLM API base URL |
 | `SNOREADER_LLM_MODEL` | `default` | Model name |
 | `SNOREADER_LLM_TIMEOUT` | `120` | Request timeout (seconds) |
-| `SNOREADER_LLM_REASONING_EFFORT` | `none` | Reasoning (thinking) effort. `none` disables thinking, which makes summarization 4-5x faster at no quality cost. Set to an empty string for servers that do not accept the parameter. |
+| `SNOREADER_LLM_REASONING_EFFORT` | `none` | Reasoning (thinking) effort. `none` disables thinking, which makes summarization 4-5x faster at no quality cost. Set to an empty string for servers that do not accept the parameter. Note that `none` also turns off the server's thinking *parser*, so a model that thinks anyway leaks its reasoning into the reply body — SnoReader strips that in `llm_client` (see below). |
 | `SNOREADER_SUMMARIZE_INTERVAL_SECONDS` | `180` | Background summarization interval |
 | `SNOREADER_SUMMARIZE_BATCH_SIZE` | `5` | Articles per summarization batch |
 
@@ -92,6 +92,12 @@ When the LLM server is available, SnoReader:
 - Suggests tags based on the AI summary
 - Auto-translates manually entered Japanese tags into English
 - Enables a chat panel at the bottom of the reader pane for free-form questions about the current article (session-only history, cleared on article switch)
+
+### Thinking-block stripping
+
+`llm_client.chat_completion` drops a thinking block the server left in the reply body before returning it, and returns nothing when the reply was cut off mid-thinking.
+
+This is needed because `SNOREADER_LLM_REASONING_EFFORT=none` tells Ollama not to *parse* thinking, not merely not to request it. When the model thinks anyway — measured at 11 of 24 replies for `qwen3.8:27b-mlx` on a long article with chat history — the reasoning text and its closing `</think>` land in the message body. The opening tag is injected by the chat template rather than generated, so the shape is `<draft>…</think><answer>` with no `<think>` at all, which is why the split is on the closing tag. Summaries and tags never showed this because `finalize_bullets` and the tag regex discard anything unstructured; chat and question suggestions pass the text straight through.
 
 ### Suggested chat questions
 
