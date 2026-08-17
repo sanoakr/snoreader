@@ -417,3 +417,27 @@ async def test_create_child_404_for_missing_parent(client: AsyncClient) -> None:
         json={"key": "x", "label_ja": "X", "priority": 1, "parent_id": 99999},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cannot_make_genre_with_children_a_child(client: AsyncClient) -> None:
+    """A(親) → B(子) を先に作った後、A を top-level の C の子にしようとすると
+    C → A → B の 3 段連鎖になる。parent 自身が top-level かどうかだけを見る
+    チェックでは塞げないので、moving_id 側が子を持つかどうかも見る必要がある。"""
+    a = (
+        await client.post(
+            "/api/genres", json={"key": "a", "label_ja": "A", "priority": 1}
+        )
+    ).json()
+    await client.post(
+        "/api/genres",
+        json={"key": "b", "label_ja": "B", "priority": 1, "parent_id": a["id"]},
+    )
+    c = (
+        await client.post(
+            "/api/genres", json={"key": "c", "label_ja": "C", "priority": 1}
+        )
+    ).json()
+
+    resp = await client.patch(f"/api/genres/{a['id']}", json={"parent_id": c["id"]})
+    assert resp.status_code == 400

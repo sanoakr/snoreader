@@ -50,15 +50,22 @@ async def _validate_parent(
         # 自分自身を親にすると自己参照の循環になる
         raise HTTPException(status_code=400, detail="A genre cannot be its own parent")
     if moving_id is not None:
-        # 自分の子を親にすると循環する
         child_ids = {
             gid
             for (gid,) in (
                 await session.execute(select(Genre.id).where(Genre.parent_id == moving_id))
             ).all()
         }
+        # 自分の子を親にすると循環する
         if parent_id in child_ids:
             raise HTTPException(status_code=400, detail="A genre cannot be its own parent")
+        # 子を持つジャンルを子にすると 3 段になる。親自身が top-level かを見る
+        # だけでは塞げない: A(親) → B(子) を作った後で A を C の子にする、という
+        # 順序で C → A → B が作れてしまう
+        if child_ids:
+            raise HTTPException(
+                status_code=400, detail="A genre with children cannot become a child"
+            )
 
 
 async def _list_genres(session: AsyncSession) -> list[GenreOut]:
