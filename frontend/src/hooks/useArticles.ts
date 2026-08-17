@@ -43,6 +43,9 @@ export function useUpdateArticle() {
       qc.invalidateQueries({ queryKey: ['recommended-count'] });
       qc.invalidateQueries({ queryKey: ['unrecommended-count'] });
       qc.invalidateQueries({ queryKey: ['saved-count'] });
+      // ジャンル件数は「未読 かつ 未保存 かつ 未 dismiss」の集計なので、
+      // 既読化・保存トグルのどちらでも変化する
+      qc.invalidateQueries({ queryKey: ['genre-counts'] });
       // invalidate ではなく in-place マージ — リフェッチによる再レンダリングを避ける
       qc.setQueryData<ArticleDetail>(['article', id], (old) =>
         old ? { ...old, ...result } : old,
