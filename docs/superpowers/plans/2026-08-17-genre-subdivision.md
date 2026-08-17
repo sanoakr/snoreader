@@ -1443,7 +1443,7 @@ async def seed_recommended_subgenres(session: AsyncSession = Depends(get_session
 - [ ] **Step 5: テストが通ることを確認**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_subgenre_seed.py -v`
-Expected: 7 件 PASS
+Expected: 6 件 PASS
 
 - [ ] **Step 6: 全体テスト**
 
