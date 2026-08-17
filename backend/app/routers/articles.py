@@ -8,8 +8,10 @@ from sqlalchemy import Integer, case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-# 保存記事の 30% 以上に付与されたタグは過剰カバレッジとみなし、Recommend スコアから除外する
-_HIGH_COVERAGE_THRESHOLD = 0.3
+# この割合を超える保存記事に付いているタグは、好みを判別できない汎用タグとみなして
+# Recommend スコアから除外する。0.3 では最頻タグ（保存 1,865 件で book が 23%）にも
+# 届かず一度も発火しなかったので 0.2 に下げた
+_HIGH_COVERAGE_THRESHOLD = 0.2
 
 # Recommend に必要な一致タグの本数。1 本の偶然の一致で推薦されないようにする。
 # これをスコアの下限値で表そうとすると効かない: スコアは log(n_saved / freq + 1) を

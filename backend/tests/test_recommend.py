@@ -165,3 +165,26 @@ async def test_tags_pruned_by_coverage_do_not_count_toward_the_minimum(
 
     res = await client.get("/api/articles/recommended")
     assert res.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_coverage_cutoff_prunes_a_tag_just_over_the_threshold(
+    client: AsyncClient,
+) -> None:
+    """閾値をわずかに超えるカバー率のタグが除外されること。
+
+    閾値そのものを固定するテスト。0.3 のままだと 25% のタグは残り、
+    common + python の 2 本一致として推薦されてしまう。
+    """
+    # common は 5/20 = 25%（閾値 0.2 超）で除外、python は 3/20 = 15% で残る
+    await _seed(
+        saved_tag_sets=[
+            *[["common", "python"] for _ in range(3)],
+            *[["common"] for _ in range(2)],
+            *[[f"filler{i}"] for i in range(_SAVED_TOTAL - 5)],
+        ],
+        unread=[("汎用タグ 1 本 + 具体タグ 1 本", ["common", "python"])],
+    )
+
+    res = await client.get("/api/articles/recommended")
+    assert res.json()["total"] == 0
