@@ -6,11 +6,18 @@ import { useQuery } from '@tanstack/react-query';
 
 const PROFILE_IMG_HOSTS = ['byline-pctr.c.yimg.jp'];
 
+// アニメ GIF はスクロールしていなくてもデコードが走り続け、iOS 系ブラウザでは
+// 画面全体の再描画（点滅）を招く。タップされるまで読み込まない。
+const GIF_SRC_RE = /\.gif(?:[?#]|$)/i;
+// 寸法が判らない GIF プレースホルダの既定比率
+const GIF_PLACEHOLDER_RATIO = '16/9';
+
 // DOMPurify の設定: 記事コンテンツに必要なタグ・属性を許可しつつスクリプトを排除
 // code.math-tex[data-latex] はバックエンドが数式保護のために挿入するタグ
 const PURIFY_CONFIG: Parameters<typeof DOMPurify.sanitize>[1] = {
   ADD_TAGS: ['math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mspace', 'mtext', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
-  ADD_ATTR: ['data-latex', 'data-display', 'colspan', 'rowspan', 'referrerpolicy', 'loading', 'style', 'target', 'rel'],
+  // width/height はバックエンドが埋めた表示寸法。落とすと領域予約が効かなくなる
+  ADD_ATTR: ['data-latex', 'data-display', 'colspan', 'rowspan', 'referrerpolicy', 'loading', 'style', 'target', 'rel', 'width', 'height'],
   FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'button'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
 };
@@ -27,20 +34,40 @@ function sanitizeContent(html: string): string {
     '<p>$1$2</p>',
   );
 
-  // <img> タグ: プロフィール画像除去・min-height・loading="lazy" 付与
+  // <img> タグ: プロフィール画像除去・GIF の遅延再生・読み込み方式の決定
   html = html.replace(/<img\b[^>]*>/gi, tag => {
     const m = tag.match(/src="([^"]*)"/i);
     if (!m) return tag;
+    const src = m[1];
     try {
-      if (PROFILE_IMG_HOSTS.includes(new URL(m[1]).hostname)) return '';
+      if (PROFILE_IMG_HOSTS.includes(new URL(src).hostname)) return '';
     } catch { /* ignore */ }
-    if (!tag.includes('style=')) {
-      tag = tag.replace('<img', '<img style="min-height:40px;"');
+
+    // バックエンドが抽出時に埋めた表示寸法。あればブラウザが領域を予約する
+    const width = tag.match(/\bwidth="(\d+)"/i)?.[1];
+    const height = tag.match(/\bheight="(\d+)"/i)?.[1];
+    const hasSize = !!(width && height);
+
+    // アニメ GIF はタップされるまで読み込まない。読み込み後と同じ高さの箱を
+    // 置くので、再生しても本文の位置はずれない
+    if (GIF_SRC_RE.test(src)) {
+      const ratio = hasSize ? `${width}/${height}` : GIF_PLACEHOLDER_RATIO;
+      const dims = hasSize ? ` data-gif-w="${width}" data-gif-h="${height}"` : '';
+      return `<span class="gif-play" data-gif-src="${src}"${dims} style="aspect-ratio:${ratio};">▶ GIF を再生</span>`;
     }
-    if (!tag.includes('loading=')) {
-      tag = tag.replace('<img', '<img loading="lazy"');
+
+    if (hasSize) {
+      // 高さが予約済みなので、遅延読み込みでもレイアウトは動かない
+      if (!tag.includes('loading=')) {
+        tag = tag.replace('<img', '<img loading="lazy"');
+      }
+      return tag;
     }
-    return tag;
+
+    // 寸法不明（抽出が古い記事）: 遅延読み込みだと読んでいる最中に画像 1 枚ごと
+    // 数百 px 伸びてスクロール位置が飛ぶ。まだ先頭にいるうちに伸びきるよう
+    // 即時読み込みに切り替える
+    return tag.replace(/\s*loading="[^"]*"/i, '');
   });
 
   // DOMPurify でスクリプト・危険なイベント属性を除去
@@ -126,6 +153,25 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // GIF プレースホルダのタップで実物に差し替える。本文は innerHTML なので
+  // KaTeX と同様にコンテナ側のイベント委譲で拾う
+  const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const holder = (e.target as HTMLElement).closest<HTMLElement>('[data-gif-src]');
+    const src = holder?.dataset.gifSrc;
+    if (!holder || !src) return;
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    const w = holder.dataset.gifW;
+    const h = holder.dataset.gifH;
+    if (w && h) {
+      img.width = Number(w);
+      img.height = Number(h);
+    }
+    holder.replaceWith(img);
+  };
 
   // 水平スワイプで前後記事ナビゲーション (モバイル)
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -488,6 +534,7 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
         ) : sanitizedContent ? (
           <div
             className="prose dark:prose-invert max-w-none [&_a]:target-blank"
+            onClick={handleContentClick}
             ref={(el) => {
               if (!el) return;
               el.querySelectorAll('a').forEach(a => {
