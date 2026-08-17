@@ -93,6 +93,8 @@ genres.parent_id INTEGER NULL REFERENCES genres(id)
 
 2 は「より具体的な指定が勝つ」という一文で説明できる規則で、無関係なジャンル同士の優劣は従来通り priority が決める。`GenreRules` スナップショットに `parent: dict[str, str | None]`（子 key → 親 key）を追加して純関数のまま実装する。
 
+**兄弟同士は同順位になる。** 子には親と同じ priority を与える（そうしないと他ジャンルとの優劣が親のときから変わる）ので、同じ親の子は必ず 3 の同値解決＝キーの辞書順で決まる。したがって「受け皿」の子——親の代表タグを引き取る子——には、具体的な兄弟より後にソートされるキーを付ける必要がある。付け忘れると具体的な兄弟の記事まで受け皿に入り、分割の意味が薄れる。`ai` の受け皿を `ai_misc` にしているのはこのため（`ai_infra` < `ai_llm` < `ai_misc`）。汎用ルールしか持たない受け皿（`dev_general` の `technology`）は通常ルールの兄弟と同じ段で競合しないので、この制約を受けない。
+
 `OTHER_GENRE`（`"other"`）は `genres` に行を持たない予約キーのままで、親としても子としても扱わない。
 
 ## API
@@ -105,7 +107,7 @@ genres.parent_id INTEGER NULL REFERENCES genres(id)
 [
   {"genre": "ai", "label_ja": "AI・LLM", "unread_count": 42, "direct_count": 0,
    "children": [
-     {"genre": "ai_general", "label_ja": "AI 全般", "unread_count": 24, "direct_count": 24, "children": []},
+     {"genre": "ai_misc", "label_ja": "AI 全般", "unread_count": 24, "direct_count": 24, "children": []},
      {"genre": "ai_llm", "label_ja": "LLM・生成AI", "unread_count": 18, "direct_count": 18, "children": []}
    ]},
   {"genre": "dev", "label_ja": "開発・技術", "unread_count": 34, "direct_count": 0, "children": [...]}
@@ -172,7 +174,7 @@ genre スコープの意味を 1 つのヘルパに集約し、`GET /articles` /
 
 **AI・LLM**
 - `ai_llm` 「LLM・生成AI」— `llm` `openai` `claude` `chatgpt` `gemini` `genai` `rag` `mcp`
-- `ai_general` 「AI 全般」— `ai`
+- `ai_misc` 「AI 全般」— `ai`
 - `ai_infra` 「AI ハードウェア」— `nvidia`
 
 **開発・技術**

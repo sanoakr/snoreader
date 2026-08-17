@@ -1205,9 +1205,9 @@ async def test_seed_creates_children_and_moves_tags(client: AsyncClient) -> None
     by_key = {g["key"]: g for g in genres}
     ai_id = by_key["ai"]["id"]
     assert by_key["ai_llm"]["parent_id"] == ai_id
-    assert by_key["ai_general"]["parent_id"] == ai_id
+    assert by_key["ai_misc"]["parent_id"] == ai_id
     # 代表タグ ai は子へ降りて、親の直下ルールは空になる
-    assert [r["tag"] for r in by_key["ai_general"]["rules"]] == ["ai"]
+    assert [r["tag"] for r in by_key["ai_misc"]["rules"]] == ["ai"]
     assert by_key["ai"]["rules"] == []
     assert by_key["ai"]["generic_rules"] == []
     # technology は汎用ルールのまま子へ移る
@@ -1271,6 +1271,45 @@ async def test_seed_reclassifies_existing_articles(client: AsyncClient) -> None:
     ai = next(r for r in rows if r["genre"] == "ai")
     assert ai["direct_count"] == 0
     assert [(c["genre"], c["unread_count"]) for c in ai["children"]] == [("ai_llm", 1)]
+
+
+@pytest.mark.asyncio
+async def test_specific_sibling_beats_the_catch_all_child(client: AsyncClient) -> None:
+    """受け皿 (ai_misc) は具体的な兄弟 (ai_llm) に負けること。
+
+    兄弟は親と同じ priority を持つので同順位になり、_resolve の同値解決は
+    キーの辞書順で決まる。受け皿のキーが兄弟より前に来ると（例えば
+    ai_general）、`llm` を持つ記事まで受け皿に吸われて分割の意味が薄れる。
+    """
+    import json
+
+    from app.database import async_session
+    from app.models import Article, Feed
+    from app.services.genre_classifier import classify, load_rules, parse_tags
+
+    async with async_session() as session:
+        feed = Feed(url="https://example.com/feed2", title="Test Feed 2")
+        session.add(feed)
+        await session.flush()
+        session.add(
+            Article(
+                feed_id=feed.id,
+                guid="b1",
+                url="https://example.com/b1",
+                title="LLM と AI",
+                summary="",
+                tag_suggestions=json.dumps(["ai", "llm"]),
+            )
+        )
+        await session.commit()
+
+    await client.post("/api/genres/seed-subgenres")
+
+    async with async_session() as session:
+        rules = await load_rules(session)
+        assert classify(parse_tags(json.dumps(["ai", "llm"])), rules) == "ai_llm"
+        # 受け皿は具体的なタグが無いときだけ使われる
+        assert classify(parse_tags(json.dumps(["ai"])), rules) == "ai_misc"
 ```
 
 - [ ] **Step 2: テストが失敗することを確認**
@@ -1284,14 +1323,21 @@ Expected: FAIL。`test_startup_does_not_create_subgenres` のみ PASS、他は 4
 
 ```python
 # 推奨サブジャンル: (親 key, [(子 key, 子 label_ja, タグ)])
-# 実データのタグ分布（2026-08-17、未読 42/34 件）から作った。並び順が優先度で、
-# 先に定義した子が勝つ。親の代表タグ（ai / technology など）も子へ降ろして
-# 親を純粋な入れ物にする——降ろさないと最大の束が分割前とほぼ変わらない。
+# 実データのタグ分布（2026-08-17、未読 42/34 件）から作った。親の代表タグ
+# （ai / technology など）も子へ降ろして親を純粋な入れ物にする——降ろさないと
+# 最大の束が分割前とほぼ変わらない。
+#
+# 兄弟は親と同じ priority を持つので必ず同順位になり、_resolve の同値解決
+# （キーの辞書順）で決まる。したがって「受け皿」の子は、具体的な兄弟より
+# 後にソートされるキーを付けないと具体的な兄弟の記事を吸ってしまう。
+# ai の受け皿は ai_misc（ai_infra < ai_llm < ai_misc）。dev の受け皿
+# dev_general は technology が汎用ルールで、通常ルールの兄弟と同じ段で
+# 競合しないため改名の必要がない。
 SUBGENRE_SEED: list[tuple[str, list[tuple[str, str, list[str]]]]] = [
     ("ai", [
         ("ai_llm", "LLM・生成AI",
          ["llm", "openai", "claude", "chatgpt", "gemini", "genai", "rag", "mcp"]),
-        ("ai_general", "AI 全般", ["ai"]),
+        ("ai_misc", "AI 全般", ["ai"]),
         ("ai_infra", "AI ハードウェア", ["nvidia"]),
     ]),
     ("dev", [
@@ -1392,7 +1438,7 @@ async def seed_recommended_subgenres(session: AsyncSession = Depends(get_session
 - [ ] **Step 5: テストが通ることを確認**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/test_subgenre_seed.py -v`
-Expected: 6 件 PASS
+Expected: 7 件 PASS
 
 - [ ] **Step 6: 全体テスト**
 
