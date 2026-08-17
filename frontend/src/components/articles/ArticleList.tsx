@@ -130,9 +130,18 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   // 一括操作ボタンの確認件数・表示名は、現在のビューの total ではなく
   // 「そのジャンルの未読件数」（= mark-all-read / dismiss が実際に処理する件数）から取る。
   // total は is_read タブ（Unread/All/Read）次第で変わってしまい、一致しない。
-  const genreCountEntry = filters.genre ? genreCounts?.find(g => g.genre === filters.genre) : undefined;
+  // 親を選んでいるときは子を含む合計、「その他」を選んでいるときは直下だけ。
+  const flatGenreCounts = useMemo(
+    () => (genreCounts ?? []).flatMap(g => [g, ...g.children]),
+    [genreCounts],
+  );
+  const genreCountEntry = filters.genre
+    ? flatGenreCounts.find(g => g.genre === filters.genre)
+    : undefined;
   const genreLabel = genreCountEntry?.label_ja ?? filters.genre ?? '';
-  const genreUnreadCount = genreCountEntry?.unread_count ?? 0;
+  const genreUnreadCount = filters.genre_exact
+    ? genreCountEntry?.direct_count ?? 0
+    : genreCountEntry?.unread_count ?? 0;
 
   const isSearching = searchQuery.length > 0;
   const isLoading = isExtractFailedView
@@ -549,7 +558,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                   title={isSearching ? '検索中は使えません（検索の絞り込みは一括操作に反映されません）' : 'このジャンルの未読をまとめて既読にする'}
                   onClick={() => {
                     if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件をまとめて既読にしますか？`)) return;
-                    markAllRead.mutate({ genre: filters.genre });
+                    markAllRead.mutate({ genre: filters.genre, genre_exact: filters.genre_exact });
                   }}
                   className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-40"
                 >
@@ -560,7 +569,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
                   title={isSearching ? '検索中は使えません（検索の絞り込みは一括操作に反映されません）' : 'このジャンルの未読を一覧から外す（削除はされません）'}
                   onClick={() => {
                     if (!confirm(`「${genreLabel}」の未読 ${genreUnreadCount} 件を非表示にしますか？\n削除はされません。「非表示にした記事」から戻せます。`)) return;
-                    dismiss.mutate({ genre: filters.genre }, {
+                    dismiss.mutate({ genre: filters.genre, genre_exact: filters.genre_exact }, {
                       onSuccess: (r) => setLastDismissed({ ids: r.ids, count: r.dismissed }),
                     });
                   }}

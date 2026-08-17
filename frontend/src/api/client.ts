@@ -84,7 +84,7 @@ export function updateArticle(id: number, data: { is_read?: boolean; is_saved?: 
   });
 }
 
-export function markAllRead(body: { feed_id?: number; genre?: string } = {}): Promise<{ marked: number }> {
+export function markAllRead(body: { feed_id?: number; genre?: string; genre_exact?: boolean } = {}): Promise<{ marked: number }> {
   return fetchJSON(`${BASE}/articles/mark-all-read`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -110,7 +110,7 @@ export function getGenreCounts(): Promise<GenreCount[]> {
   return fetchJSON(`${BASE}/articles/genres`);
 }
 
-export function dismissArticles(body: { genre?: string; ids?: number[] }): Promise<{ dismissed: number; ids: number[] }> {
+export function dismissArticles(body: { genre?: string; genre_exact?: boolean; ids?: number[] }): Promise<{ dismissed: number; ids: number[] }> {
   return fetchJSON(`${BASE}/articles/dismiss`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

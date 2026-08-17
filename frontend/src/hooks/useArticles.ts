@@ -57,7 +57,7 @@ export function useUpdateArticle() {
 export function useMarkAllRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { feed_id?: number; genre?: string } = {}) => api.markAllRead(body),
+    mutationFn: (body: { feed_id?: number; genre?: string; genre_exact?: boolean } = {}) => api.markAllRead(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['feeds'] });
@@ -214,7 +214,7 @@ function useInvalidateAfterBulk() {
 export function useDismiss() {
   const invalidate = useInvalidateAfterBulk();
   return useMutation({
-    mutationFn: (body: { genre?: string; ids?: number[] }) => api.dismissArticles(body),
+    mutationFn: (body: { genre?: string; genre_exact?: boolean; ids?: number[] }) => api.dismissArticles(body),
     onSuccess: invalidate,
   });
 }

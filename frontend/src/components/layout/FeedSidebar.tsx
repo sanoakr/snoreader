@@ -8,6 +8,10 @@ import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
 import { GenreManagerModal } from './GenreManagerModal';
 import type { ArticleFilters } from '../../types';
 
+// 親の未読がこれを超えたらサイドバーで子ジャンルを展開する。
+// 「これだけなら片付けられる」と思える大きさに束を割るための境界
+const GENRE_SPLIT_THRESHOLD = 30;
+
 interface Props {
   filters: ArticleFilters;
   onFilterChange: (f: ArticleFilters) => void;
@@ -104,6 +108,18 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
     }
   };
 
+  // ビューは filters の排他フラグで表せているので、ジャンルを選ぶときは他を明示的に消す
+  const selectGenre = (genre: string, opts?: { exact?: boolean }) => {
+    onFilterChange({
+      ...filters,
+      genre,
+      genre_exact: opts?.exact ? true : undefined,
+      dismissed: undefined, feed_id: undefined, is_saved: undefined,
+      tag_id: undefined, untagged: undefined,
+      recommended: undefined, unrecommended: undefined, extract_failed: undefined,
+    });
+  };
+
   const handleRenameSubmit = (tagId: number) => {
     const newName = editingTagName.trim();
     if (!newName) { setEditingTagId(null); return; }
@@ -130,7 +146,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
       <nav className="flex-1 p-2 space-y-0.5">
         {/* All articles */}
         <button
-          onClick={() => onFilterChange({ ...filters, genre: undefined, dismissed: undefined, feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
+          onClick={() => onFilterChange({ ...filters, genre: undefined, genre_exact: undefined, dismissed: undefined, feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.feed_id == null && filters.is_saved == null && filters.tag_id == null && !filters.untagged && !filters.recommended && !filters.unrecommended && !filters.extract_failed && filters.genre == null && !filters.dismissed ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
@@ -175,7 +191,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         {/* Saved */}
         <button
-          onClick={() => onFilterChange({ ...filters, genre: undefined, dismissed: undefined, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
+          onClick={() => onFilterChange({ ...filters, genre: undefined, genre_exact: undefined, dismissed: undefined, feed_id: undefined, is_saved: true, is_read: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
           className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
             filters.is_saved === true && filters.tag_id == null && !filters.untagged ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
           }`}
@@ -291,35 +307,58 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
-        {/* ジャンル別ナビゲーション。件数 0 のジャンルは API が返さないのでそのまま並べる */}
+        {/* ジャンル別ナビゲーション。件数 0 のジャンルは API が返さないのでそのまま並べる。
+            親の未読が閾値を超えたときだけ子を展開する（超えていなければ従来通り 1 行） */}
         {genreCounts && genreCounts.length > 0 && (
           <div className="mt-4">
             <div className="px-2 mb-1 text-xs font-semibold text-gray-400">ジャンル</div>
-            {genreCounts.map((g) => (
-              <button
-                key={g.genre}
-                onClick={() => onFilterChange({
-                  ...filters, genre: g.genre, dismissed: undefined,
-                  feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined,
-                  recommended: undefined, unrecommended: undefined, extract_failed: undefined,
-                })}
-                className={`w-full flex items-center gap-2 px-2 py-1 text-sm text-left rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
-                  filters.genre === g.genre ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
-                }`}
-              >
-                <span className="truncate flex-1">{g.label_ja}</span>
-                <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0">
-                  {g.unread_count}
-                </span>
-              </button>
-            ))}
+            {genreCounts.map((g) => {
+              const expanded = g.children.length > 0 && g.unread_count > GENRE_SPLIT_THRESHOLD;
+              return (
+                <div key={g.genre}>
+                  <GenreNavRow
+                    label={g.label_ja}
+                    count={g.unread_count}
+                    active={filters.genre === g.genre && !filters.genre_exact}
+                    // 子を展開している親行は集計の見出しなので、超過していても警告色にしない
+                    warn={!expanded && g.unread_count > GENRE_SPLIT_THRESHOLD}
+                    onClick={() => selectGenre(g.genre)}
+                  />
+                  {expanded && (
+                    <>
+                      {g.children.map((c) => (
+                        <GenreNavRow
+                          key={c.genre}
+                          label={c.label_ja}
+                          count={c.unread_count}
+                          indent
+                          active={filters.genre === c.genre}
+                          warn={c.unread_count > GENRE_SPLIT_THRESHOLD}
+                          onClick={() => selectGenre(c.genre)}
+                        />
+                      ))}
+                      {g.direct_count > 0 && (
+                        <GenreNavRow
+                          label="その他"
+                          count={g.direct_count}
+                          indent
+                          active={filters.genre === g.genre && !!filters.genre_exact}
+                          warn={g.direct_count > GENRE_SPLIT_THRESHOLD}
+                          onClick={() => selectGenre(g.genre, { exact: true })}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
         {/* 非表示にした記事（ジャンルで束にした未読を「後回し」にした記事）の一覧 */}
         <button
           onClick={() => onFilterChange({
-            ...filters, dismissed: true, genre: undefined,
+            ...filters, dismissed: true, genre: undefined, genre_exact: undefined,
             feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined,
             recommended: undefined, unrecommended: undefined, extract_failed: undefined,
           })}
@@ -335,7 +374,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         {feeds?.map((feed) => (
           <div key={feed.id} className="group flex items-center">
             <button
-              onClick={() => onFilterChange({ ...filters, genre: undefined, dismissed: undefined, feed_id: feed.id, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
+              onClick={() => onFilterChange({ ...filters, genre: undefined, genre_exact: undefined, dismissed: undefined, feed_id: feed.id, is_saved: undefined, tag_id: undefined, untagged: undefined, recommended: undefined, unrecommended: undefined, extract_failed: undefined })}
               className={`flex-1 text-left px-3 py-1.5 rounded text-sm truncate flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-800 ${
                 filters.feed_id === feed.id ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
               }`}
@@ -528,7 +567,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 onFilterChange={onFilterChange}
                 onNavigateToOther={() => {
                   setShowGenreManager(false);
-                  onFilterChange({ ...filters, genre: 'other', dismissed: undefined });
+                  onFilterChange({ ...filters, genre: 'other', genre_exact: undefined, dismissed: undefined });
                 }}
               />
             )}
@@ -561,5 +600,36 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         )}
       </div>
     </aside>
+  );
+}
+
+/** ジャンルナビの 1 行。選べる束が閾値を超えていたら件数バッジを警告色にする */
+function GenreNavRow({
+  label, count, active, warn, indent, onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  warn: boolean;
+  indent?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={warn ? '子ジャンルを追加すると更に分けられます' : undefined}
+      className={`w-full flex items-center gap-2 py-1 text-sm text-left rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
+        indent ? 'pl-6 pr-2' : 'px-2'
+      } ${active ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''}`}
+    >
+      <span className="truncate flex-1">{indent ? `↳ ${label}` : label}</span>
+      <span
+        className={`text-xs rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0 text-white ${
+          warn ? 'bg-amber-500' : 'bg-blue-500'
+        }`}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
