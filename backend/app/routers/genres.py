@@ -34,6 +34,33 @@ async def _reclassify(session: AsyncSession) -> int:
     return changed
 
 
+async def _validate_parent(
+    session: AsyncSession, parent_id: int | None, *, moving_id: int | None = None
+) -> None:
+    """親指定の妥当性を見る。階層は 2 段固定。"""
+    if parent_id is None:
+        return
+    parent = await session.get(Genre, parent_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent genre not found")
+    if parent.parent_id is not None:
+        # 親自身がすでに子なら、それを親にするのは 3 段目を作ることになる
+        raise HTTPException(status_code=400, detail="Genres can only nest one level deep")
+    if moving_id is not None and parent_id == moving_id:
+        # 自分自身を親にすると自己参照の循環になる
+        raise HTTPException(status_code=400, detail="A genre cannot be its own parent")
+    if moving_id is not None:
+        # 自分の子を親にすると循環する
+        child_ids = {
+            gid
+            for (gid,) in (
+                await session.execute(select(Genre.id).where(Genre.parent_id == moving_id))
+            ).all()
+        }
+        if parent_id in child_ids:
+            raise HTTPException(status_code=400, detail="A genre cannot be its own parent")
+
+
 async def _list_genres(session: AsyncSession) -> list[GenreOut]:
     genres = (
         await session.execute(select(Genre).order_by(Genre.priority, Genre.key))
@@ -56,6 +83,7 @@ async def _list_genres(session: AsyncSession) -> list[GenreOut]:
                 key=genre.key,
                 label_ja=genre.label_ja,
                 priority=genre.priority,
+                parent_id=genre.parent_id,
                 rules=sorted(normal, key=lambda r: r.tag),
                 generic_rules=sorted(generic, key=lambda r: r.tag),
             )
@@ -80,7 +108,11 @@ async def create_genre(body: GenreCreate, session: AsyncSession = Depends(get_se
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Genre already exists")
 
-    genre = Genre(key=key, label_ja=body.label_ja.strip(), priority=body.priority)
+    await _validate_parent(session, body.parent_id)
+
+    genre = Genre(
+        key=key, label_ja=body.label_ja.strip(), priority=body.priority, parent_id=body.parent_id
+    )
     session.add(genre)
     await session.commit()
     await session.refresh(genre)
@@ -91,6 +123,7 @@ async def create_genre(body: GenreCreate, session: AsyncSession = Depends(get_se
         key=genre.key,
         label_ja=genre.label_ja,
         priority=genre.priority,
+        parent_id=genre.parent_id,
         reclassified=changed,
     )
 
@@ -106,6 +139,9 @@ async def update_genre(
         genre.label_ja = body.label_ja.strip()
     if body.priority is not None:
         genre.priority = body.priority
+    if "parent_id" in body.model_fields_set:
+        await _validate_parent(session, body.parent_id, moving_id=genre_id)
+        genre.parent_id = body.parent_id
     await session.commit()
     # priority を変えると解決順が変わるので再分類する
     changed = await _reclassify(session)

@@ -159,6 +159,8 @@ class GenreOut(BaseModel):
     key: str
     label_ja: str
     priority: int
+    # NULL が親ジャンル。値を持つものが子（階層は 2 段固定）
+    parent_id: int | None = None
     # 管理 UI がチップの削除に rule id を使うので、タグ名だけでなく id も返す
     rules: list[GenreRuleOut] = []
     generic_rules: list[GenreRuleOut] = []
@@ -170,11 +172,15 @@ class GenreCreate(BaseModel):
     key: str
     label_ja: str
     priority: int = 100
+    parent_id: int | None = None
 
 
 class GenreUpdate(BaseModel):
     label_ja: str | None = None
     priority: int | None = None
+    # 明示的に None を送ると親を外してトップレベルへ上げる。
+    # 「未指定」と区別するため、ルーター側は model_fields_set を見る
+    parent_id: int | None = None
 
 
 class GenreRuleCreate(BaseModel):

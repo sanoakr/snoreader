@@ -342,3 +342,78 @@ async def test_genre_counts_orphan_key_uses_raw_key_as_label(client: AsyncClient
     assert orphan["label_ja"] == "ai_llm"
     assert orphan["children"] == []
     assert orphan["direct_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_create_child_genre(client: AsyncClient) -> None:
+    genres = (await client.get("/api/genres")).json()
+    parent_id = next(g["id"] for g in genres if g["key"] == "ai")
+
+    resp = await client.post(
+        "/api/genres",
+        json={"key": "ai_llm", "label_ja": "LLM・生成AI", "priority": 1, "parent_id": parent_id},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["parent_id"] == parent_id
+
+
+@pytest.mark.asyncio
+async def test_cannot_nest_deeper_than_two_levels(client: AsyncClient) -> None:
+    genres = (await client.get("/api/genres")).json()
+    parent_id = next(g["id"] for g in genres if g["key"] == "ai")
+    child = (
+        await client.post(
+            "/api/genres",
+            json={"key": "ai_llm", "label_ja": "LLM", "priority": 1, "parent_id": parent_id},
+        )
+    ).json()
+
+    resp = await client.post(
+        "/api/genres",
+        json={"key": "ai_llm_rag", "label_ja": "RAG", "priority": 1, "parent_id": child["id"]},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_cannot_set_parent_to_self_or_descendant(client: AsyncClient) -> None:
+    genres = (await client.get("/api/genres")).json()
+    parent_id = next(g["id"] for g in genres if g["key"] == "ai")
+    child = (
+        await client.post(
+            "/api/genres",
+            json={"key": "ai_llm", "label_ja": "LLM", "priority": 1, "parent_id": parent_id},
+        )
+    ).json()
+
+    assert (
+        await client.patch(f"/api/genres/{parent_id}", json={"parent_id": parent_id})
+    ).status_code == 400
+    assert (
+        await client.patch(f"/api/genres/{parent_id}", json={"parent_id": child["id"]})
+    ).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_promote_child_to_top_level(client: AsyncClient) -> None:
+    genres = (await client.get("/api/genres")).json()
+    parent_id = next(g["id"] for g in genres if g["key"] == "ai")
+    child = (
+        await client.post(
+            "/api/genres",
+            json={"key": "ai_llm", "label_ja": "LLM", "priority": 1, "parent_id": parent_id},
+        )
+    ).json()
+
+    resp = await client.patch(f"/api/genres/{child['id']}", json={"parent_id": None})
+    assert resp.status_code == 200
+    assert resp.json()["parent_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_child_404_for_missing_parent(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/genres",
+        json={"key": "x", "label_ja": "X", "priority": 1, "parent_id": 99999},
+    )
+    assert resp.status_code == 404
