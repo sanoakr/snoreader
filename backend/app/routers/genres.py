@@ -18,6 +18,7 @@ from app.schemas import (
     GenreRuleOut,
     GenreUpdate,
     ReclassifyResult,
+    SeedSubgenresResult,
 )
 
 router = APIRouter(tags=["genres"])
@@ -198,3 +199,19 @@ async def delete_genre_rule(rule_id: int, session: AsyncSession = Depends(get_se
     await session.delete(rule)
     await session.commit()
     return ReclassifyResult(reclassified=await _reclassify(session))
+
+
+@router.post("/genres/seed-subgenres", response_model=SeedSubgenresResult)
+async def seed_recommended_subgenres(session: AsyncSession = Depends(get_session)):
+    """推奨サブジャンルを投入する。
+
+    起動時の自動投入はしない。既存環境では数千件の genre 付け替えで FTS の
+    再インデックスが走り（実測 6,408 件で約 15 秒）、押していない利用者から
+    見れば「勝手に分類が変わった」になるため。
+    """
+    from app.services.genre_seed import seed_subgenres
+
+    created, moved = await seed_subgenres(session)
+    await session.commit()
+    changed = await _reclassify(session) if (created or moved) else 0
+    return SeedSubgenresResult(created=created, moved=moved, reclassified=changed)

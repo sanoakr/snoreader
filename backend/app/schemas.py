@@ -193,6 +193,12 @@ class ReclassifyResult(BaseModel):
     reclassified: int
 
 
+class SeedSubgenresResult(BaseModel):
+    created: int
+    moved: int
+    reclassified: int
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):
