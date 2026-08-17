@@ -517,13 +517,12 @@ async def update_article(
             # 非表示を解除する。解除しないと Saved ビュー/カウントに出てこなくなる。
             article.dismissed_at = None
 
-    # 新規 Saved 化 + 未タグ付け + auto_tag 許可 → 既存タグで自動マッチ
-    if newly_saved and body.auto_tag:
-        existing_tag_ids = (await session.execute(
-            select(ArticleTag.tag_id).where(ArticleTag.article_id == article.id)
-        )).scalars().all()
-        if not existing_tag_ids:
-            await _auto_attach_matching_tags(session, article)
+    # 保存時に既存タグを自動付与することはしない。同じキーワードマッチ結果は
+    # リーダーの「Suggested:」チップに出ていて 1 タップで付けられる一方、
+    # 自動付与は「未タグの記事を保存した直後」= まさに手動でタグを付けようと
+    # している場面で必ず発動し、しかも PATCH の応答に tags が無いため
+    # 次の再取得まで見えない。付けた覚えのないタグが後から現れる形になっていた。
+    # 明示操作の一括付与 (POST /articles/auto-tag-saved) はそのまま残す。
 
     await session.commit()
     await session.refresh(article)

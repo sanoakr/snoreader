@@ -15,7 +15,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - Bilingual tagging — English/Japanese display toggle, manual input with auto-translation
 - AI summary auto-generation (background job, Japanese bullet points)
 - AI tag suggestions — existing-tag keyword match (title / body, Unicode-safe) merged with LLM candidates
-- Auto-tag on save — when a previously untagged article is starred, matching existing tags are attached automatically (capped at 3 per article). Bulk re-run from the sidebar ⚙ menu (`Auto tag`) also re-tags Saved articles that already have 4 or more tags (old tags are stripped and rebuilt)
+- Keyword auto-tagging is an explicit action, never a side effect of saving. Starring an article attaches nothing on its own — the same keyword matches show up as blue "Suggested:" chips in the reader, one tap each. The sidebar ⚙ menu's `Auto tag` runs the match over Saved articles in bulk: untagged ones get up to 3 tags, and articles with 4 or more have their tags stripped and rebuilt
 - Article-scoped LLM chat panel that answers from the article, DuckDuckGo web search, and general knowledge
 - Suggested chat questions — tappable chips of short, article-specific questions above the chat input. Pre-generated in the background (unread articles first) and cached per article, so the chips are already there when the article is opened. Sending a chip refreshes the chips into conversation-aware follow-ups; typing your own question leaves them as they are
 - IDF-weighted "Recommend" view with automatic exclusion of high-coverage tags (coverage ≥ 30%) and a score floor to suppress weak single-tag matches
