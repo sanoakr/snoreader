@@ -883,12 +883,10 @@ async def get_genre_counts(session: AsyncSession = Depends(get_session)):
     label_by_key = {key: label for _gid, key, label, _parent in genre_rows}
     key_by_id = {gid: key for gid, key, _label, _parent in genre_rows}
     children_keys: dict[str, list[str]] = {}
-    child_keys: set[str] = set()
     for _gid, key, _label, parent_id in genre_rows:
         parent_key = key_by_id.get(parent_id) if parent_id is not None else None
         if parent_key:
             children_keys.setdefault(parent_key, []).append(key)
-            child_keys.add(key)
 
     def node(key: str) -> GenreCountOut:
         children = [node(c) for c in children_keys.get(key, [])]
