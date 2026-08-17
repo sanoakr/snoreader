@@ -20,6 +20,7 @@ from app.services import content_extractor
 from app.services.content_extractor import (
     _apply_image_sizes,
     _declared_image_sizes,
+    _drop_spacer_images,
     _is_probe_allowed,
     _is_public_ip,
     _parse_image_size,
@@ -120,6 +121,33 @@ def test_unsized_image_srcs_skips_svg_and_duplicates() -> None:
         "https://cdn.test/a.png",
         "https://cdn.test/b.png?w=1",
     ]
+
+
+def test_drop_spacer_images() -> None:
+    """1x1 スペーサーは本文ではない。Togetter はアイコンの数だけ p.gif を並べる。"""
+    html = (
+        '<p>本文</p>'
+        '<img width="1" height="1" src="https://s.tgstc.com/static/web/p.gif" alt="">'
+        '<img width="2" height="2" src="https://cdn.test/beacon.gif">'
+        '<img width="640" height="480" src="https://cdn.test/photo.jpg">'
+        '<img src="https://cdn.test/unknown.png">'
+    )
+    out = _drop_spacer_images(html)
+    assert 'p.gif' not in out
+    assert 'beacon.gif' not in out
+    assert 'photo.jpg' in out
+    # 寸法不明のタグは判定できないので触らない
+    assert 'unknown.png' in out
+
+
+def test_fix_html_drops_declared_spacers() -> None:
+    html = '<p>x</p><img src="/p.gif" width="1" height="1">'
+    out = _fix_html(
+        html,
+        base_url="https://togetter.test/li/1",
+        image_sizes={"https://togetter.test/p.gif": (1, 1)},
+    )
+    assert '<img' not in out
 
 
 @pytest.mark.parametrize(
