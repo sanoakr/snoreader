@@ -14,9 +14,14 @@ import zlib
 
 import httpx
 
+import pytest
+
+from app.services import content_extractor
 from app.services.content_extractor import (
     _apply_image_sizes,
     _declared_image_sizes,
+    _is_probe_allowed,
+    _is_public_ip,
     _parse_image_size,
     _probe_image_sizes,
     _unsized_image_srcs,
@@ -117,7 +122,112 @@ def test_unsized_image_srcs_skips_svg_and_duplicates() -> None:
     ]
 
 
-def test_probe_image_sizes_reads_only_the_header() -> None:
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("93.184.216.34", True),
+        ("2606:2800:220:1:248:1893:25c8:1946", True),
+        ("127.0.0.1", False),
+        ("::1", False),
+        ("10.1.2.3", False),
+        ("172.16.5.4", False),
+        ("192.168.1.10", False),
+        ("169.254.169.254", False),  # クラウドのメタデータエンドポイント
+        ("100.77.68.10", False),     # Tailscale (100.64.0.0/10)
+        ("fd00::1", False),
+        ("0.0.0.0", False),
+        ("not-an-ip", False),
+    ],
+)
+def test_is_public_ip(raw: str, expected: bool) -> None:
+    assert _is_public_ip(raw) is expected
+
+
+def _fake_getaddrinfo(mapping: dict[str, list[str]]):
+    """host -> 解決結果 IP 群 のマップで getaddrinfo を差し替えるヘルパ。"""
+    async def getaddrinfo(host, port, *args, **kwargs):
+        if host not in mapping:
+            raise OSError(f"unknown host {host}")
+        return [(None, None, None, "", (ip, port)) for ip in mapping[host]]
+    return getaddrinfo
+
+
+def test_is_probe_allowed_rejects_internal_and_odd_targets(monkeypatch) -> None:
+    """本文の <img src> は攻撃者が書ける値なので、内部宛は実測しない (SSRF)。"""
+    resolved = {
+        "cdn.test": ["93.184.216.34"],
+        "localhost": ["127.0.0.1"],
+        "metadata.test": ["169.254.169.254"],
+        # 公開 IP と内部 IP を混ぜて返すホスト (DNS 側での抜け道を塞ぐ)
+        "mixed.test": ["93.184.216.34", "10.0.0.5"],
+    }
+
+    class _Loop:
+        getaddrinfo = staticmethod(_fake_getaddrinfo(resolved))
+
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: _Loop())
+
+    async def allowed(url: str) -> bool:
+        return await _is_probe_allowed(url)
+
+    assert asyncio.run(allowed("https://cdn.test/a.png")) is True
+    assert asyncio.run(allowed("http://cdn.test/a.png")) is True
+    assert asyncio.run(allowed("http://localhost/a.png")) is False
+    assert asyncio.run(allowed("http://metadata.test/latest/meta-data/")) is False
+    assert asyncio.run(allowed("https://mixed.test/a.png")) is False
+    # 未知のスキーム・ポート・ホスト
+    assert asyncio.run(allowed("file:///etc/passwd")) is False
+    assert asyncio.run(allowed("https://cdn.test:11434/a.png")) is False
+    assert asyncio.run(allowed("https://unknown.test/a.png")) is False
+
+
+def test_probe_image_sizes_skips_disallowed_targets(monkeypatch) -> None:
+    """許可外の宛先には 1 リクエストも出さない。"""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, content=_png(10, 10))
+
+    async def deny_all(url: str) -> bool:
+        return False
+
+    monkeypatch.setattr(content_extractor, "_is_probe_allowed", deny_all)
+
+    async def run() -> dict[str, tuple[int, int]]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await _probe_image_sizes(client, ["http://127.0.0.1/a.png"])
+
+    assert asyncio.run(run()) == {}
+    assert requested == []
+
+
+def test_probe_image_sizes_does_not_follow_redirects(monkeypatch) -> None:
+    """リダイレクト先は再検証できないため追わない (内部宛への横流しを防ぐ)。"""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/redirect.png":
+            return httpx.Response(302, headers={"location": "http://127.0.0.1/a.png"})
+        return httpx.Response(200, content=_png(10, 10))
+
+    async def allow_all(url: str) -> bool:
+        return True
+
+    monkeypatch.setattr(content_extractor, "_is_probe_allowed", allow_all)
+
+    async def run() -> dict[str, tuple[int, int]]:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), follow_redirects=True
+        ) as client:
+            return await _probe_image_sizes(client, ["https://cdn.test/redirect.png"])
+
+    assert asyncio.run(run()) == {}
+    assert requested == ["https://cdn.test/redirect.png"]
+
+
+def test_probe_image_sizes_reads_only_the_header(monkeypatch) -> None:
     """先頭バイトだけ読んで寸法を得る。取得できない画像は結果に含めない。"""
     requested: list[str] = []
 
@@ -128,6 +238,11 @@ def test_probe_image_sizes_reads_only_the_header() -> None:
         if request.url.path == "/broken.png":
             return httpx.Response(404)
         return httpx.Response(200, content=b"not an image")
+
+    async def allow_all(url: str) -> bool:
+        return True
+
+    monkeypatch.setattr(content_extractor, "_is_probe_allowed", allow_all)
 
     async def run() -> dict[str, tuple[int, int]]:
         transport = httpx.MockTransport(handler)
