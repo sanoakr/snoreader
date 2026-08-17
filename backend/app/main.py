@@ -102,6 +102,12 @@ async def lifespan(app: FastAPI):
             text("CREATE INDEX IF NOT EXISTS idx_articles_genre ON articles(genre)")
         )
 
+        # genres の親子階層（create_all は既存テーブルに列を足さない）
+        genre_col_rows = await conn.execute(text("PRAGMA table_info(genres)"))
+        existing_genre_cols = {row[1] for row in genre_col_rows.fetchall()}
+        if "parent_id" not in existing_genre_cols:
+            await conn.execute(text("ALTER TABLE genres ADD COLUMN parent_id INTEGER"))
+
         # 既存 FTS テーブルが古いトークナイザのまま残っていれば作り直す
         existing = await conn.execute(
             text("SELECT sql FROM sqlite_master WHERE name='articles_fts'")
