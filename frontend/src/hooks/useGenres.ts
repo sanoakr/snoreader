@@ -18,7 +18,7 @@ function useInvalidateGenreDefs() {
 export function useCreateGenre() {
   const invalidate = useInvalidateGenreDefs();
   return useMutation({
-    mutationFn: (body: { key: string; label_ja: string; priority: number }) => api.createGenre(body),
+    mutationFn: (body: { key: string; label_ja: string; priority: number; parent_id?: number | null }) => api.createGenre(body),
     onSuccess: invalidate,
   });
 }
@@ -26,7 +26,7 @@ export function useCreateGenre() {
 export function useUpdateGenre() {
   const invalidate = useInvalidateGenreDefs();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: number; label_ja?: string; priority?: number }) =>
+    mutationFn: ({ id, ...body }: { id: number; label_ja?: string; priority?: number; parent_id?: number | null }) =>
       api.updateGenre(id, body),
     onSuccess: invalidate,
   });
@@ -49,4 +49,9 @@ export function useCreateGenreRule() {
 export function useDeleteGenreRule() {
   const invalidate = useInvalidateGenreDefs();
   return useMutation({ mutationFn: (id: number) => api.deleteGenreRule(id), onSuccess: invalidate });
+}
+
+export function useSeedSubgenres() {
+  const invalidate = useInvalidateGenreDefs();
+  return useMutation({ mutationFn: api.seedSubgenres, onSuccess: invalidate });
 }

@@ -59,6 +59,7 @@ export function getArticles(
   if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
   if (filters.untagged) params.set('untagged', 'true');
   if (filters.genre) params.set('genre', filters.genre);
+  if (filters.genre_exact) params.set('genre_exact', 'true');
   if (filters.dismissed != null) params.set('dismissed', String(filters.dismissed));
   if (filters.sort) params.set('sort', filters.sort);
   if (filters.order) params.set('order', filters.order);
@@ -131,7 +132,7 @@ export function getGenres(): Promise<GenreDef[]> {
   return fetchJSON(`${BASE}/genres`);
 }
 
-export function createGenre(body: { key: string; label_ja: string; priority: number }): Promise<GenreDef> {
+export function createGenre(body: { key: string; label_ja: string; priority: number; parent_id?: number | null }): Promise<GenreDef> {
   return fetchJSON(`${BASE}/genres`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -139,12 +140,16 @@ export function createGenre(body: { key: string; label_ja: string; priority: num
   });
 }
 
-export function updateGenre(id: number, body: { label_ja?: string; priority?: number }): Promise<GenreDef> {
+export function updateGenre(id: number, body: { label_ja?: string; priority?: number; parent_id?: number | null }): Promise<GenreDef> {
   return fetchJSON(`${BASE}/genres/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+export function seedSubgenres(): Promise<{ created: number; moved: number; reclassified: number }> {
+  return fetchJSON(`${BASE}/genres/seed-subgenres`, { method: 'POST' });
 }
 
 export function deleteGenre(id: number): Promise<{ reclassified: number }> {
