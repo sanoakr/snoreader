@@ -313,7 +313,13 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           <div className="mt-4">
             <div className="px-2 mb-1 text-xs font-semibold text-gray-400">ジャンル</div>
             {genreCounts.map((g) => {
-              const expanded = g.children.length > 0 && g.unread_count > GENRE_SPLIT_THRESHOLD;
+              // 表示中の束が閾値を割った瞬間に選択中の行が消えないよう、
+              // その親配下を見ている間は件数に関わらず展開したままにする
+              const viewingHere =
+                filters.genre === g.genre || g.children.some((c) => c.genre === filters.genre);
+              const expanded =
+                g.children.length > 0 &&
+                (g.unread_count > GENRE_SPLIT_THRESHOLD || viewingHere);
               return (
                 <div key={g.genre}>
                   <GenreNavRow
@@ -337,7 +343,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                           onClick={() => selectGenre(c.genre)}
                         />
                       ))}
-                      {g.direct_count > 0 && (
+                      {(g.direct_count > 0 || (filters.genre === g.genre && !!filters.genre_exact)) && (
                         <GenreNavRow
                           label="その他"
                           count={g.direct_count}
