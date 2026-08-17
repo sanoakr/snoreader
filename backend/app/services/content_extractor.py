@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
+import socket
 from typing import Literal
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import trafilatura
@@ -39,6 +41,8 @@ _IMAGE_PROBE_TIMEOUT = 8.0
 _IMAGE_PROBE_LIMIT = 40
 # 寸法を読めない・読む意味がない拡張子
 _UNSIZED_IMAGE_SUFFIXES = ('.svg', '.svgz')
+# 実測リクエストを許可するポート (画像 CDN は 80/443 のみ)
+_ALLOWED_PROBE_PORTS = frozenset({80, 443})
 
 # trafilatura が出力する <row>/<cell> を標準 HTML テーブルタグへ変換するパターン
 _ROW_RE = re.compile(r'<row\b([^>]*)>', re.IGNORECASE)
@@ -247,6 +251,55 @@ def _unsized_image_srcs(html: str) -> list[str]:
     return srcs
 
 
+def _is_public_ip(raw: str) -> bool:
+    """名前解決結果が公開アドレスかどうか。ループバック・LAN・リンクローカルは除く。"""
+    try:
+        ip = ipaddress.ip_address(raw)
+    except ValueError:
+        return False
+    # is_global が loopback / private / link-local / reserved / unspecified を、
+    # Tailscale が使う 100.64.0.0/10 (shared address space) までまとめて弾く
+    return ip.is_global and not ip.is_multicast
+
+
+async def _is_probe_allowed(url: str) -> bool:
+    """画像実測の宛先として許可するか判定する。
+
+    本文の ``<img src>`` はページ側が自由に書けるため、そのまま取りに行くと
+    ループバックや LAN 内サービスへの GET に使われる (SSRF)。名前解決した
+    アドレスが**すべて**公開アドレスである http/https の 80/443 のみ許可する。
+    弾いた場合は寸法が入らないだけで、画像そのものはブラウザ側で表示される。
+
+    名前解決の結果は httpx が接続時に再度引くため DNS rebinding は残るが、
+    ここで取得するのはピクセル寸法のみでレスポンス本文は保存も表示もしない。
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").rstrip(".")
+    if not host:
+        return False
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:  # ポート部が数値でない URL
+        return False
+    if port not in _ALLOWED_PROBE_PORTS:
+        return False
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(
+            host, port, type=socket.SOCK_STREAM
+        )
+    except (OSError, UnicodeError) as e:
+        logger.debug("画像サイズ取得: 名前解決失敗 %s: %s", host, e)
+        return False
+    if not infos:
+        return False
+    return all(_is_public_ip(info[4][0]) for info in infos)
+
+
 async def _probe_image_sizes(
     client: httpx.AsyncClient, srcs: list[str]
 ) -> dict[str, tuple[int, int]]:
@@ -260,11 +313,19 @@ async def _probe_image_sizes(
 
     async def probe(src: str) -> tuple[str, tuple[int, int] | None]:
         async with sem:
+            if not await _is_probe_allowed(src):
+                logger.debug("画像サイズ取得をスキップ (許可外の宛先) %s", src)
+                return src, None
             try:
+                # リダイレクト先は再検証できないので追わない。3xx は寸法なし扱い
                 async with client.stream(
-                    "GET", src, headers=headers, timeout=_IMAGE_PROBE_TIMEOUT
+                    "GET",
+                    src,
+                    headers=headers,
+                    timeout=_IMAGE_PROBE_TIMEOUT,
+                    follow_redirects=False,
                 ) as resp:
-                    if resp.status_code >= 400:
+                    if resp.status_code >= 300:
                         return src, None
                     buf = bytearray()
                     async for chunk in resp.aiter_bytes():
