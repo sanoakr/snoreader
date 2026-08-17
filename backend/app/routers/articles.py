@@ -48,6 +48,7 @@ async def list_articles(
     tag_id: int | None = None,
     untagged: bool = False,
     genre: str | None = None,
+    genre_exact: bool = False,
     dismissed: bool = False,
     sort: str = "published_at",
     order: str = "desc",
@@ -74,8 +75,11 @@ async def list_articles(
         stmt = stmt.where(~Article.id.in_(select(ArticleTag.article_id)))
         count_stmt = count_stmt.where(~Article.id.in_(select(ArticleTag.article_id)))
     if genre is not None:
-        stmt = stmt.where(Article.genre == genre)
-        count_stmt = count_stmt.where(Article.genre == genre)
+        from app.services.genre_scope import genre_keys
+
+        keys = await genre_keys(session, genre, exact=genre_exact)
+        stmt = stmt.where(Article.genre.in_(keys))
+        count_stmt = count_stmt.where(Article.genre.in_(keys))
 
     # 通常の読書導線からは外し、Dismissed ビューでだけ見せる
     if dismissed:

@@ -92,3 +92,97 @@ async def test_deleting_parent_deletes_children(client: AsyncClient) -> None:
             select(func.count()).select_from(Genre).where(Genre.key == "ai_llm")
         )
         assert remaining == 0
+
+
+async def _seed_hierarchy() -> None:
+    """ai の下に ai_llm を作り、llm タグを子に付け替える。"""
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Genre, GenreRule
+
+    async with async_session() as session:
+        parent = (await session.execute(select(Genre).where(Genre.key == "ai"))).scalar_one()
+        child = Genre(key="ai_llm", label_ja="LLM・生成AI", priority=1, parent_id=parent.id)
+        session.add(child)
+        await session.flush()
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == "llm"))
+        ).scalar_one()
+        rule.genre_id = child.id
+        await session.commit()
+
+
+async def _make_article(guid: str, genre: str, **kwargs) -> int:
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Article, Feed
+
+    async with async_session() as session:
+        feed = (await session.execute(select(Feed))).scalars().first()
+        if feed is None:
+            feed = Feed(url="https://example.com/feed", title="Test Feed")
+            session.add(feed)
+            await session.flush()
+        article = Article(
+            feed_id=feed.id,
+            guid=guid,
+            url=f"https://example.com/{guid}",
+            title=kwargs.pop("title", "Title"),
+            summary="",
+            genre=genre,
+            **kwargs,
+        )
+        session.add(article)
+        await session.flush()
+        await session.commit()
+        return article.id
+
+
+@pytest.mark.asyncio
+async def test_genre_keys_expands_to_descendants(client: AsyncClient) -> None:
+    from app.database import async_session
+    from app.services.genre_scope import genre_keys
+
+    await _seed_hierarchy()
+    async with async_session() as session:
+        assert sorted(await genre_keys(session, "ai")) == ["ai", "ai_llm"]
+        assert await genre_keys(session, "ai_llm") == ["ai_llm"]
+        assert await genre_keys(session, "ai", exact=True) == ["ai"]
+        # genres に行を持たない予約キーはそのまま返す
+        assert await genre_keys(session, "other") == ["other"]
+
+
+@pytest.mark.asyncio
+async def test_list_articles_by_parent_includes_children(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.get("/api/articles?genre=ai")
+    assert resp.status_code == 200
+    assert {a["guid"] for a in resp.json()["items"]} == {"p1", "c1"}
+    assert resp.json()["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_list_articles_by_child_returns_only_child(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.get("/api/articles?genre=ai_llm")
+    assert {a["guid"] for a in resp.json()["items"]} == {"c1"}
+
+
+@pytest.mark.asyncio
+async def test_list_articles_genre_exact_excludes_children(client: AsyncClient) -> None:
+    """子を持つ親の「まだ子ルールが無いタグの記事」を単独で扱う導線。"""
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.get("/api/articles?genre=ai&genre_exact=true")
+    assert {a["guid"] for a in resp.json()["items"]} == {"p1"}
+    assert resp.json()["total"] == 1
