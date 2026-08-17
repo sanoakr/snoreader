@@ -240,3 +240,56 @@ async def test_dismiss_genre_exact_leaves_children(client: AsyncClient) -> None:
 
     listed = await client.get("/api/articles?genre=ai_llm")
     assert listed.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_nest_children_and_sum_parent(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+    await _make_article("c2", "ai_llm")
+
+    rows = (await client.get("/api/articles/genres")).json()
+    ai = next(r for r in rows if r["genre"] == "ai")
+    assert ai["unread_count"] == 3
+    assert ai["direct_count"] == 1
+    assert [(c["genre"], c["unread_count"]) for c in ai["children"]] == [("ai_llm", 2)]
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_parent_appears_even_with_no_direct_articles(
+    client: AsyncClient,
+) -> None:
+    """代表タグを子に降ろすと親の直下は 0 件になる。それでも親は一覧に出る。"""
+    await _seed_hierarchy()
+    await _make_article("c1", "ai_llm")
+
+    rows = (await client.get("/api/articles/genres")).json()
+    ai = next(r for r in rows if r["genre"] == "ai")
+    assert ai["direct_count"] == 0
+    assert ai["unread_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_omit_empty_and_sort_desc(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("c1", "ai_llm")
+    await _make_article("d1", "dev")
+    await _make_article("d2", "dev")
+
+    rows = (await client.get("/api/articles/genres")).json()
+    assert [r["genre"] for r in rows] == ["dev", "ai"]
+    assert all(r["unread_count"] > 0 for r in rows)
+    assert next(r for r in rows if r["genre"] == "dev")["children"] == []
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_keep_reserved_other_at_top_level(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("o1", "other")
+
+    rows = (await client.get("/api/articles/genres")).json()
+    other = next(r for r in rows if r["genre"] == "other")
+    assert other["label_ja"] == "その他"
+    assert other["children"] == []
+    assert other["direct_count"] == 1

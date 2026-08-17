@@ -142,7 +142,11 @@ class ExcludePatternOut(BaseModel):
 class GenreCountOut(BaseModel):
     genre: str
     label_ja: str
+    # direct_count + 子の合計。サイドバーの親行に出す数字
     unread_count: int
+    # そのキーが直接付いている記事数（子ルールがまだ無いタグの記事）
+    direct_count: int = 0
+    children: list["GenreCountOut"] = []
 
 
 class GenreRuleOut(BaseModel):
