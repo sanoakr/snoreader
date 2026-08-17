@@ -582,9 +582,12 @@ async def mark_all_read(
     if body.feed_id is not None:
         stmt = stmt.where(Article.feed_id == body.feed_id)
     if body.genre is not None:
+        from app.services.genre_scope import genre_keys
+
         # 一括 dismiss が保存済みを保護する以上、genre 一括だけ保護しないのは非対称
+        keys = await genre_keys(session, body.genre, exact=body.genre_exact)
         stmt = stmt.where(
-            Article.genre == body.genre,
+            Article.genre.in_(keys),
             Article.is_saved == False,  # noqa: E712
         )
 
@@ -599,13 +602,16 @@ async def mark_all_read(
     return {"marked": count}
 
 
-def _dismiss_targets(body: DismissRequest, *, restoring: bool):
-    """dismiss / undismiss の対象を絞る WHERE 条件を組む。"""
+def _dismiss_targets(body: DismissRequest, *, restoring: bool, keys: list[str] | None):
+    """dismiss / undismiss の対象を絞る WHERE 条件を組む。
+
+    keys は genre を子孫まで展開したキー一覧（genre 指定が無ければ None）。
+    """
     conds = []
     if body.ids:
         conds.append(Article.id.in_(body.ids))
-    elif body.genre:
-        conds.append(Article.genre == body.genre)
+    elif keys:
+        conds.append(Article.genre.in_(keys))
         if not restoring:
             # UI の確認ダイアログは「未読 N 件」の unread_count を見せているので、
             # 実処理も未読に限定しないと確認件数と実処理件数がずれる（既読混入で桁違いになる）
@@ -627,9 +633,18 @@ async def dismiss_articles(
     if not body.ids and not body.genre:
         raise HTTPException(status_code=422, detail="Either genre or ids is required")
 
+    from app.services.genre_scope import genre_keys
+
+    keys = (
+        await genre_keys(session, body.genre, exact=body.genre_exact)
+        if body.genre
+        else None
+    )
     now = datetime.now(timezone.utc).isoformat()
     articles = (
-        await session.execute(select(Article).where(*_dismiss_targets(body, restoring=False)))
+        await session.execute(
+            select(Article).where(*_dismiss_targets(body, restoring=False, keys=keys))
+        )
     ).scalars().all()
     for article in articles:
         article.dismissed_at = now
@@ -646,8 +661,17 @@ async def undismiss_articles(
     if not body.ids and not body.genre:
         raise HTTPException(status_code=422, detail="Either genre or ids is required")
 
+    from app.services.genre_scope import genre_keys
+
+    keys = (
+        await genre_keys(session, body.genre, exact=body.genre_exact)
+        if body.genre
+        else None
+    )
     articles = (
-        await session.execute(select(Article).where(*_dismiss_targets(body, restoring=True)))
+        await session.execute(
+            select(Article).where(*_dismiss_targets(body, restoring=True, keys=keys))
+        )
     ).scalars().all()
     for article in articles:
         article.dismissed_at = None

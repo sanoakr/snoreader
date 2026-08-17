@@ -103,11 +103,15 @@ class ArticleUpdate(BaseModel):
 class MarkAllReadRequest(BaseModel):
     feed_id: int | None = None
     genre: str | None = None
+    # True にすると子ジャンルを含めず、その genre 直下の記事だけを対象にする
+    genre_exact: bool = False
 
 
 class DismissRequest(BaseModel):
     genre: str | None = None
     ids: list[int] | None = None
+    # True にすると子ジャンルを含めず、その genre 直下の記事だけを対象にする
+    genre_exact: bool = False
 
 
 class DedupRequest(BaseModel):

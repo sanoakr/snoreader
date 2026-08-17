@@ -186,3 +186,57 @@ async def test_list_articles_genre_exact_excludes_children(client: AsyncClient) 
     resp = await client.get("/api/articles?genre=ai&genre_exact=true")
     assert {a["guid"] for a in resp.json()["items"]} == {"p1"}
     assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_by_parent_covers_children(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.post("/api/articles/mark-all-read", json={"genre": "ai"})
+    assert resp.json()["marked"] == 2
+
+    listed = await client.get("/api/articles?genre=ai&is_read=false")
+    assert listed.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_genre_exact_leaves_children(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.post(
+        "/api/articles/mark-all-read", json={"genre": "ai", "genre_exact": True}
+    )
+    assert resp.json()["marked"] == 1
+
+    listed = await client.get("/api/articles?genre=ai_llm&is_read=false")
+    assert listed.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dismiss_by_parent_covers_children(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.post("/api/articles/dismiss", json={"genre": "ai"})
+    assert resp.json()["dismissed"] == 2
+    assert len(resp.json()["ids"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_dismiss_genre_exact_leaves_children(client: AsyncClient) -> None:
+    await _seed_hierarchy()
+    await _make_article("p1", "ai")
+    await _make_article("c1", "ai_llm")
+
+    resp = await client.post(
+        "/api/articles/dismiss", json={"genre": "ai", "genre_exact": True}
+    )
+    assert resp.json()["dismissed"] == 1
+
+    listed = await client.get("/api/articles?genre=ai_llm")
+    assert listed.json()["total"] == 1
