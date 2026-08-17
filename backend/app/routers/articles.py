@@ -11,8 +11,12 @@ from sqlalchemy.orm import selectinload
 # 保存記事の 30% 以上に付与されたタグは過剰カバレッジとみなし、Recommend スコアから除外する
 _HIGH_COVERAGE_THRESHOLD = 0.3
 
-# Recommend に含めるスコア下限（弱い 1 タグ一致を排除）
-_RECOMMEND_SCORE_MIN = 1.0
+# Recommend に必要な一致タグの本数。1 本の偶然の一致で推薦されないようにする。
+# これをスコアの下限値で表そうとすると効かない: スコアは log(n_saved / freq + 1) を
+# 含むので値域が保存件数とともに広がり、タグ 1 本でも二桁のスコアが付く
+# （保存 1,865 件の実測で単一一致は 5.2〜13.8 点）。一致本数なら保存が貯まっても
+# 意味がズレない
+_RECOMMEND_MIN_MATCHED_TAGS = 2
 
 from app.config import settings
 from app.database import get_session
@@ -228,13 +232,15 @@ async def get_recommended_articles(
     for row in rows:
         article, feed_title = row[0], row[1]
         suggestions = set(_json.loads(article.tag_suggestions))
+        # カバレッジ除外されたタグは「好みを判別できない」という判断なので本数に数えない
+        matched = [t for t in suggestions if t in scoreable_freq]
+        if len(matched) < _RECOMMEND_MIN_MATCHED_TAGS:
+            continue
         score = sum(
             math.log1p(scoreable_freq[t]) * math.log(n_saved / scoreable_freq[t] + 1)
-            for t in suggestions
-            if t in scoreable_freq
+            for t in matched
         )
-        if score > _RECOMMEND_SCORE_MIN:
-            scored.append((score, article, feed_title))
+        scored.append((score, article, feed_title))
 
     def _pub_ts(a: Article) -> float:
         try:
