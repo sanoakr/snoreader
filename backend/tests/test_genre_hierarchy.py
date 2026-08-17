@@ -293,3 +293,52 @@ async def test_genre_counts_keep_reserved_other_at_top_level(client: AsyncClient
     assert other["label_ja"] == "その他"
     assert other["children"] == []
     assert other["direct_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_zero_count_sibling_omitted_from_children(
+    client: AsyncClient,
+) -> None:
+    """親に子が 2 つあり、一方が 0 件なら children には非 0 件の子だけが残る。"""
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Genre
+
+    await _seed_hierarchy()
+    async with async_session() as session:
+        parent = (await session.execute(select(Genre).where(Genre.key == "ai"))).scalar_one()
+        # ai_llm に加えてもう一つ子を作るが、こちらには記事を作らないので 0 件のまま
+        session.add(Genre(key="ai_robotics", label_ja="ロボティクス", priority=2, parent_id=parent.id))
+        await session.commit()
+
+    await _make_article("c1", "ai_llm")
+
+    rows = (await client.get("/api/articles/genres")).json()
+    ai = next(r for r in rows if r["genre"] == "ai")
+    assert [c["genre"] for c in ai["children"]] == ["ai_llm"]
+
+
+@pytest.mark.asyncio
+async def test_genre_counts_orphan_key_uses_raw_key_as_label(client: AsyncClient) -> None:
+    """genres の定義（行）が削除された後も、そのキーが付いた記事はトップレベルに残り、
+    ラベルは生のキーになる。API の DELETE ではなく DB を直接触って genres 行だけを消し、
+    記事の genre 列は古いキーのまま残す（reclassify_all を経由させない）。"""
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Genre
+
+    await _seed_hierarchy()
+    await _make_article("o1", "ai_llm")
+
+    async with async_session() as session:
+        child = (await session.execute(select(Genre).where(Genre.key == "ai_llm"))).scalar_one()
+        await session.delete(child)
+        await session.commit()
+
+    rows = (await client.get("/api/articles/genres")).json()
+    orphan = next(r for r in rows if r["genre"] == "ai_llm")
+    assert orphan["label_ja"] == "ai_llm"
+    assert orphan["children"] == []
+    assert orphan["direct_count"] == 1
