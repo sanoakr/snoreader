@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles, useDedupArticles } from '../../hooks/useFeeds';
-import { useRecommendedCount, useUnrecommendedCount, useSavedCount, useAiStatus, useExtractFailed, useGenreCounts } from '../../hooks/useArticles';
+import { useRecommendedCount, useSavedCount, useAiStatus, useExtractFailed, useGenreCounts } from '../../hooks/useArticles';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 import { useExcludePatterns, useCreateExcludePattern, useDeleteExcludePattern } from '../../hooks/useExcludePatterns';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
@@ -50,7 +50,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
   const totalUnread = feeds?.reduce((s, f) => s + f.unread_count, 0) ?? 0;
   const { data: recommendedCount } = useRecommendedCount();
-  const { data: unrecommendedCount } = useUnrecommendedCount();
   const { data: savedCount } = useSavedCount();
   const { data: aiStatus } = useAiStatus();
   const { data: extractFailed } = useExtractFailed();
@@ -170,21 +169,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           {!!recommendedCount && (
             <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
               {recommendedCount}
-            </span>
-          )}
-        </button>
-
-        {/* Unrecommended */}
-        <button
-          onClick={() => onFilterChange({ unrecommended: true })}
-          className={`w-full text-left px-3 py-2 rounded text-sm flex justify-between items-center hover:bg-gray-200 dark:hover:bg-gray-800 ${
-            filters.unrecommended ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
-          }`}
-        >
-          <span>✧ Unrecommend</span>
-          {!!unrecommendedCount && (
-            <span className="text-xs bg-blue-500 text-white rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
-              {unrecommendedCount}
             </span>
           )}
         </button>
