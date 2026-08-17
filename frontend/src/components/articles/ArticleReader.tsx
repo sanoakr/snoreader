@@ -7,10 +7,14 @@ import { useQuery } from '@tanstack/react-query';
 const PROFILE_IMG_HOSTS = ['byline-pctr.c.yimg.jp'];
 
 // アニメ GIF はスクロールしていなくてもデコードが走り続け、iOS 系ブラウザでは
-// 画面全体の再描画（点滅）を招く。タップされるまで読み込まない。
+// 画面全体の再描画（点滅）を招く。大きいものだけタップされるまで読み込まない。
 const GIF_SRC_RE = /\.gif(?:[?#]|$)/i;
-// 寸法が判らない GIF プレースホルダの既定比率
-const GIF_PLACEHOLDER_RATIO = '16/9';
+// この面積 (≒200x200) 未満の GIF は据え置きにしない。アイコン程度のデコードは
+// 軽く、逆に遅延させると小さな画像のために大きな枠が出てしまう
+const GIF_DEFER_MIN_AREA = 40_000;
+// この px 以下の画像は計測ビーコンや遅延読み込みのスペーサーで、本文ではない
+// (Togetter は実 URL を JS で差し込むため 1x1 の p.gif がアイコンの数だけ並ぶ)
+const SPACER_MAX_PX = 2;
 
 // DOMPurify の設定: 記事コンテンツに必要なタグ・属性を許可しつつスクリプトを排除
 // code.math-tex[data-latex] はバックエンドが数式保護のために挿入するタグ
@@ -47,13 +51,20 @@ function sanitizeContent(html: string): string {
     const width = tag.match(/\bwidth="(\d+)"/i)?.[1];
     const height = tag.match(/\bheight="(\d+)"/i)?.[1];
     const hasSize = !!(width && height);
+    const w = Number(width);
+    const h = Number(height);
 
-    // アニメ GIF はタップされるまで読み込まない。読み込み後と同じ高さの箱を
-    // 置くので、再生しても本文の位置はずれない
-    if (GIF_SRC_RE.test(src)) {
-      const ratio = hasSize ? `${width}/${height}` : GIF_PLACEHOLDER_RATIO;
-      const dims = hasSize ? ` data-gif-w="${width}" data-gif-h="${height}"` : '';
-      return `<span class="gif-play" data-gif-src="${src}"${dims} style="aspect-ratio:${ratio};">▶ GIF を再生</span>`;
+    // スペーサー・ビーコンは本文ではないので消す
+    if (hasSize && w <= SPACER_MAX_PX && h <= SPACER_MAX_PX) return '';
+
+    // 大きいと判っているアニメ GIF だけタップ再生にする。
+    // 寸法が判るのは抽出時に埋めた記事だけで、判らない旧記事はそのまま出す——
+    // Togetter / Posfie は実 URL を JS で差し込むため 1x1 スペーサーが数十枚並び、
+    // 判らないものまで据え置くと中身のない枠がその数だけ出てしまう。
+    // 小さい GIF もアイコン程度のデコードなので据え置かない
+    if (GIF_SRC_RE.test(src) && hasSize && w * h >= GIF_DEFER_MIN_AREA) {
+      // 再生後とまったく同じ箱を置くので、タップしても本文の位置はずれない
+      return `<span class="gif-play" data-gif-src="${src}" data-gif-w="${width}" data-gif-h="${height}" style="width:${width}px;aspect-ratio:${width}/${height};">▶ GIF を再生</span>`;
     }
 
     if (hasSize) {

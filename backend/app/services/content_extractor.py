@@ -43,6 +43,10 @@ _IMAGE_PROBE_LIMIT = 40
 _UNSIZED_IMAGE_SUFFIXES = ('.svg', '.svgz')
 # 実測リクエストを許可するポート (画像 CDN は 80/443 のみ)
 _ALLOWED_PROBE_PORTS = frozenset({80, 443})
+# この px 以下の画像は計測用ビーコンや遅延読み込みのスペーサーで、本文ではない。
+# Togetter は実 URL を JS で差し込むため、静的 HTML には 1x1 の p.gif が
+# ユーザーアイコンの数だけ並ぶ。寸法を埋めた後なら確実に判別できる
+_SPACER_MAX_PX = 2
 
 # trafilatura が出力する <row>/<cell> を標準 HTML テーブルタグへ変換するパターン
 _ROW_RE = re.compile(r'<row\b([^>]*)>', re.IGNORECASE)
@@ -361,15 +365,31 @@ def _apply_image_sizes(html: str, sizes: dict[str, tuple[int, int]]) -> str:
     return _IMG_TAG_RE.sub(_fix, html)
 
 
+def _drop_spacer_images(html: str) -> str:
+    """1x1 のビーコン / スペーサー画像を落とす。寸法が判っているタグだけ見る。"""
+    def _drop(m: re.Match) -> str:
+        tag = m.group(0)
+        w_m = _IMG_WIDTH_RE.search(tag)
+        h_m = _IMG_HEIGHT_RE.search(tag)
+        if not (w_m and h_m):
+            return tag
+        if int(w_m.group(1)) <= _SPACER_MAX_PX and int(h_m.group(1)) <= _SPACER_MAX_PX:
+            return ""
+        return tag
+
+    return _IMG_TAG_RE.sub(_drop, html)
+
+
 async def _reserve_image_space(client: httpx.AsyncClient, html: str) -> str:
     """本文画像の高さを予約するため、寸法未指定の <img> を実測して埋める。"""
     srcs = _unsized_image_srcs(html)
     if not srcs:
-        return html
+        return _drop_spacer_images(html)
     if len(srcs) > _IMAGE_PROBE_LIMIT:
         logger.info("画像が多いため寸法実測を %d 件に制限", _IMAGE_PROBE_LIMIT)
         srcs = srcs[:_IMAGE_PROBE_LIMIT]
-    return _apply_image_sizes(html, await _probe_image_sizes(client, srcs))
+    html = _apply_image_sizes(html, await _probe_image_sizes(client, srcs))
+    return _drop_spacer_images(html)
 
 
 def _fix_html(
@@ -435,6 +455,7 @@ def _fix_html(
 
     # 元ページが宣言していた表示サイズを復元する (実ファイルの原寸より優先)
     html = _apply_image_sizes(html, image_sizes or {})
+    html = _drop_spacer_images(html)
 
     # Qiita / note / KaTeX サイトが本文に埋める生の数式記法を
     # <code class="math-tex"> プレースホルダーへ変換する
