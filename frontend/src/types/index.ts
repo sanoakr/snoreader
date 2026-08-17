@@ -34,7 +34,11 @@ export interface ExcludePattern {
 export interface GenreCount {
   genre: string;
   label_ja: string;
+  /** direct_count + 子の合計 */
   unread_count: number;
+  /** そのキーが直接付いている記事数（子ルールがまだ無いタグの記事） */
+  direct_count: number;
+  children: GenreCount[];
 }
 
 export interface GenreRuleDef {
@@ -47,6 +51,7 @@ export interface GenreDef {
   key: string;
   label_ja: string;
   priority: number;
+  parent_id: number | null;
   rules: GenreRuleDef[];
   generic_rules: GenreRuleDef[];
   reclassified: number;
@@ -100,6 +105,7 @@ export interface ArticleFilters {
   unrecommended?: boolean;
   extract_failed?: boolean;
   genre?: string;
+  genre_exact?: boolean;
   dismissed?: boolean;
 }
 

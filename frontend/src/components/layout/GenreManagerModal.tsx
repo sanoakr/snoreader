@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   useGenres,
   useCreateGenre,
@@ -6,8 +6,9 @@ import {
   useDeleteGenre,
   useCreateGenreRule,
   useDeleteGenreRule,
+  useSeedSubgenres,
 } from '../../hooks/useGenres';
-import type { ArticleFilters } from '../../types';
+import type { ArticleFilters, GenreDef } from '../../types';
 
 // 新規ジャンルの初期優先度。数字が小さいほど分類時に優先される。
 const DEFAULT_NEW_GENRE_PRIORITY = 100;
@@ -29,6 +30,7 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
   const deleteGenre = useDeleteGenre();
   const createRule = useCreateGenreRule();
   const deleteRule = useDeleteGenreRule();
+  const seedSubgenres = useSeedSubgenres();
 
   const [newTag, setNewTag] = useState('');
   const [newRuleGenreId, setNewRuleGenreId] = useState<number | null>(null);
@@ -36,34 +38,49 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
   const [lastReclassified, setLastReclassified] = useState<number | null>(null);
   const [newGenreKey, setNewGenreKey] = useState('');
   const [newGenreLabel, setNewGenreLabel] = useState('');
+  const [newGenreParentId, setNewGenreParentId] = useState<number | null>(null);
 
   // タグ追加フォームの <select> は空の選択肢を持たないため、ユーザーがまだ選択していない間は
   // 先頭のジャンルを既定値として使う（state 自体は未選択のまま保つ。setState-in-effect を避けるため）。
   const effectiveRuleGenreId = newRuleGenreId ?? genres?.[0]?.id ?? null;
 
-  return (
-    <div className="space-y-1 px-1">
-      {genres?.map((g) => (
-        <div key={g.id} className="border-b border-gray-200 dark:border-gray-700 py-2">
-          <div className="flex items-center gap-2">
-            <input
-              defaultValue={g.label_ja}
-              onBlur={(e) => {
-                // 再分類（最大 10 秒）が進行中は古い g.label_ja からの差分判定で
-                // 二重にミューテーションを飛ばさないようガードする
-                if (updateGenre.isPending) return;
-                const v = e.target.value.trim();
-                if (v && v !== g.label_ja) {
-                  updateGenre.mutate(
-                    { id: g.id, label_ja: v },
-                    { onSuccess: (res) => setLastReclassified(res.reclassified) },
-                  );
-                }
-              }}
-              className="text-sm px-1 py-0.5 border rounded dark:bg-gray-800 dark:border-gray-600"
-            />
-            <span className="text-xs text-gray-400 font-mono">{g.key}</span>
-            <div className="flex-1" />
+  // 親→子の入れ子で並べる。priority 昇順は既存のまま
+  const tree = useMemo(() => {
+    const list = genres ?? [];
+    const parents = list.filter((g) => g.parent_id == null);
+    return parents.map((p) => ({
+      parent: p,
+      children: list.filter((c) => c.parent_id === p.id),
+    }));
+  }, [genres]);
+
+  // 親行と子行で描画は共通。子は親と同じ priority を保つのが分割の前提なので上下ボタンを出さない
+  const renderGenre = (g: GenreDef, isChild: boolean) => (
+    <div
+      key={g.id}
+      className={`border-b border-gray-200 dark:border-gray-700 py-2 ${isChild ? 'pl-6' : ''}`}
+    >
+      <div className="flex items-center gap-2">
+        <input
+          defaultValue={g.label_ja}
+          onBlur={(e) => {
+            // 再分類（最大 10 秒）が進行中は古い g.label_ja からの差分判定で
+            // 二重にミューテーションを飛ばさないようガードする
+            if (updateGenre.isPending) return;
+            const v = e.target.value.trim();
+            if (v && v !== g.label_ja) {
+              updateGenre.mutate(
+                { id: g.id, label_ja: v },
+                { onSuccess: (res) => setLastReclassified(res.reclassified) },
+              );
+            }
+          }}
+          className="text-sm px-1 py-0.5 border rounded dark:bg-gray-800 dark:border-gray-600"
+        />
+        <span className="text-xs text-gray-400 font-mono">{g.key}</span>
+        <div className="flex-1" />
+        {!isChild && (
+          <>
             <button
               onClick={() =>
                 updateGenre.mutate(
@@ -90,53 +107,64 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
             >
               ↓
             </button>
+          </>
+        )}
+        <button
+          onClick={() => {
+            if (!confirm(`ジャンル「${g.label_ja}」を削除しますか？\n所属タグの割り当ても消え、記事は再分類されます。`)) return;
+            deleteGenre.mutate(g.id, {
+              onSuccess: (res) => {
+                setLastReclassified(res.reclassified);
+                // 表示中のジャンルを削除した場合、その絞り込みに取り残されないよう解除する
+                if (filters.genre === g.key) {
+                  onFilterChange({ ...filters, genre: undefined, genre_exact: undefined });
+                }
+              },
+            });
+          }}
+          disabled={deleteGenre.isPending}
+          className="text-xs px-1.5 py-0.5 rounded border border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 disabled:opacity-50"
+        >
+          削除
+        </button>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {g.rules.map((r) => (
+          <span key={r.id} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 rounded">
+            {r.tag}
             <button
-              onClick={() => {
-                if (!confirm(`ジャンル「${g.label_ja}」を削除しますか？\n所属タグの割り当ても消え、記事は再分類されます。`)) return;
-                deleteGenre.mutate(g.id, {
-                  onSuccess: (res) => {
-                    setLastReclassified(res.reclassified);
-                    // 表示中のジャンルを削除した場合、その絞り込みに取り残されないよう解除する
-                    if (filters.genre === g.key) {
-                      onFilterChange({ ...filters, genre: undefined });
-                    }
-                  },
-                });
-              }}
-              disabled={deleteGenre.isPending}
-              className="text-xs px-1.5 py-0.5 rounded border border-red-300 text-red-600 dark:border-red-700 dark:text-red-400 disabled:opacity-50"
+              onClick={() => deleteRule.mutate(r.id, { onSuccess: (res) => setLastReclassified(res.reclassified) })}
+              className="text-gray-400 hover:text-red-500"
             >
-              削除
+              ×
             </button>
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {g.rules.map((r) => (
-              <span key={r.id} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 rounded">
-                {r.tag}
-                <button
-                  onClick={() => deleteRule.mutate(r.id, { onSuccess: (res) => setLastReclassified(res.reclassified) })}
-                  className="text-gray-400 hover:text-red-500"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            {g.generic_rules.map((r) => (
-              <span
-                key={r.id}
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs border border-dashed border-gray-400 rounded"
-                title="汎用ルール: 他に手がかりが無いときだけ使う"
-              >
-                {r.tag}
-                <button
-                  onClick={() => deleteRule.mutate(r.id, { onSuccess: (res) => setLastReclassified(res.reclassified) })}
-                  className="text-gray-400 hover:text-red-500"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
+          </span>
+        ))}
+        {g.generic_rules.map((r) => (
+          <span
+            key={r.id}
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs border border-dashed border-gray-400 rounded"
+            title="汎用ルール: 他に手がかりが無いときだけ使う"
+          >
+            {r.tag}
+            <button
+              onClick={() => deleteRule.mutate(r.id, { onSuccess: (res) => setLastReclassified(res.reclassified) })}
+              className="text-gray-400 hover:text-red-500"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-1 px-1">
+      {tree.map(({ parent, children }) => (
+        <div key={parent.id}>
+          {renderGenre(parent, false)}
+          {children.map((c) => renderGenre(c, true))}
         </div>
       ))}
 
@@ -165,10 +193,13 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
           onChange={(e) => setNewRuleGenreId(Number(e.target.value))}
           className="text-sm px-1 py-0.5 border rounded dark:bg-gray-800 dark:border-gray-600"
         >
-          {genres?.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.label_ja}
-            </option>
+          {tree.map(({ parent, children }) => (
+            <optgroup key={parent.id} label={parent.label_ja}>
+              <option value={parent.id}>{parent.label_ja}</option>
+              {children.map((c) => (
+                <option key={c.id} value={c.id}>{`↳ ${c.label_ja}`}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
         <input
@@ -194,8 +225,16 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
           e.preventDefault();
           const key = newGenreKey.trim().toLowerCase();
           if (!key || !newGenreLabel.trim()) return;
+          // 子は親と同じ priority を持つのが前提（祖先・子孫の枝刈りで子が勝ち、
+          // 他ジャンルとの優劣は親のときと変わらない）
+          const parent = (genres ?? []).find((g) => g.id === newGenreParentId);
           createGenre.mutate(
-            { key, label_ja: newGenreLabel.trim(), priority: DEFAULT_NEW_GENRE_PRIORITY },
+            {
+              key,
+              label_ja: newGenreLabel.trim(),
+              priority: parent ? parent.priority : DEFAULT_NEW_GENRE_PRIORITY,
+              parent_id: newGenreParentId,
+            },
             {
               onSuccess: (res) => {
                 setNewGenreKey('');
@@ -222,14 +261,38 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
           placeholder="表示名"
           className="text-sm px-1.5 py-0.5 border rounded dark:bg-gray-800 dark:border-gray-600 w-32"
         />
+        <select
+          value={newGenreParentId ?? ''}
+          onChange={(e) => setNewGenreParentId(e.target.value ? Number(e.target.value) : null)}
+          className="px-1.5 py-1 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+        >
+          <option value="">親ジャンルとして作成</option>
+          {(genres ?? []).filter((g) => g.parent_id == null).map((g) => (
+            <option key={g.id} value={g.id}>{g.label_ja} の子</option>
+          ))}
+        </select>
         <button type="submit" className="text-xs text-blue-500 hover:text-blue-700">
           ジャンル追加
         </button>
       </form>
 
-      <button onClick={onNavigateToOther} className="mt-2 text-xs text-blue-500 hover:text-blue-700">
-        分類できなかった記事（その他）を見る
-      </button>
+      <div className="mt-2 flex items-center gap-3">
+        <button onClick={onNavigateToOther} className="text-xs text-blue-500 hover:text-blue-700">
+          分類できなかった記事（その他）を見る
+        </button>
+        <button
+          onClick={() => {
+            if (!confirm('推奨サブジャンルを投入します。既存記事の再分類に十数秒かかります。')) return;
+            seedSubgenres.mutate(undefined, {
+              onSuccess: (r) => setLastReclassified(r.reclassified),
+            });
+          }}
+          disabled={seedSubgenres.isPending}
+          className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50"
+        >
+          {seedSubgenres.isPending ? '投入中...' : '推奨サブジャンルを投入'}
+        </button>
+      </div>
     </div>
   );
 }

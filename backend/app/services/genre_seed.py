@@ -76,3 +76,82 @@ async def seed_genres(session: AsyncSession) -> int:
     await session.flush()
 
     return len(by_key)
+
+
+# 推奨サブジャンル: (親 key, [(子 key, 子 label_ja, タグ)])
+# 実データのタグ分布（2026-08-17、未読 42/34 件）から作った。親の代表タグ
+# （ai / technology など）も子へ降ろして親を純粋な入れ物にする——降ろさないと
+# 最大の束が分割前とほぼ変わらない。
+#
+# 兄弟は親と同じ priority を持つので必ず同順位になり、_resolve の同値解決
+# （キーの辞書順）で決まる。したがって「受け皿」の子は、具体的な兄弟より
+# 後にソートされるキーを付けないと具体的な兄弟の記事を吸ってしまう。
+# ai の受け皿は ai_misc（ai_infra < ai_llm < ai_misc）。dev の受け皿
+# dev_general は technology が汎用ルールで、通常ルールの兄弟と同じ段で
+# 競合しないため改名の必要がない。
+SUBGENRE_SEED: list[tuple[str, list[tuple[str, str, list[str]]]]] = [
+    ("ai", [
+        ("ai_llm", "LLM・生成AI",
+         ["llm", "openai", "claude", "chatgpt", "gemini", "genai", "rag", "mcp"]),
+        ("ai_misc", "AI 全般", ["ai"]),
+        ("ai_infra", "AI ハードウェア", ["nvidia"]),
+    ]),
+    ("dev", [
+        ("dev_prog", "プログラミング",
+         ["programming", "python", "rust", "javascript", "web", "api", "github",
+          "vscode", "unity"]),
+        ("dev_infra", "クラウド・インフラ",
+         ["cloud", "aws", "linux", "windows", "microsoft", "network"]),
+        ("dev_data", "データ・DB", ["database", "data", "excel"]),
+        ("dev_tools", "ツール・ハード",
+         ["tools", "software", "it", "performance", "hardware"]),
+        ("dev_general", "技術一般", ["technology"]),
+    ]),
+]
+
+
+async def seed_subgenres(session: AsyncSession) -> tuple[int, int]:
+    """推奨サブジャンルを冪等に投入し、(作成した子数, 付け替えたルール数) を返す。
+
+    - 既に存在する子キーには触らない
+    - タグの付け替えは「現在その親ジャンルに属しているタグ」だけを対象にする。
+      別ジャンルにあるものは利用者が移したか元から別扱いなので動かさない。
+      この規則なら「利用者が動かしたのか、まだ投入していないのか」を区別する
+      必要がない
+    - is_generic は元のルールの値を保つ（technology は汎用のまま子へ移る）
+    - commit と再分類は呼び出し側が行う
+    """
+    created = 0
+    moved = 0
+    for parent_key, children in SUBGENRE_SEED:
+        parent = (
+            await session.execute(select(Genre).where(Genre.key == parent_key))
+        ).scalar_one_or_none()
+        if parent is None or parent.parent_id is not None:
+            continue  # 未定義の親、または既に子になっている親は対象外
+
+        for child_key, child_label, tags in children:
+            child = (
+                await session.execute(select(Genre).where(Genre.key == child_key))
+            ).scalar_one_or_none()
+            if child is None:
+                child = Genre(
+                    key=child_key,
+                    label_ja=child_label,
+                    priority=parent.priority,
+                    parent_id=parent.id,
+                )
+                session.add(child)
+                await session.flush()
+                created += 1
+
+            for tag in tags:
+                rule = (
+                    await session.execute(select(GenreRule).where(GenreRule.tag == tag))
+                ).scalar_one_or_none()
+                if rule is None or rule.genre_id != parent.id:
+                    continue
+                rule.genre_id = child.id
+                moved += 1
+    await session.flush()
+    return created, moved

@@ -103,11 +103,15 @@ class ArticleUpdate(BaseModel):
 class MarkAllReadRequest(BaseModel):
     feed_id: int | None = None
     genre: str | None = None
+    # True にすると子ジャンルを含めず、その genre 直下の記事だけを対象にする
+    genre_exact: bool = False
 
 
 class DismissRequest(BaseModel):
     genre: str | None = None
     ids: list[int] | None = None
+    # True にすると子ジャンルを含めず、その genre 直下の記事だけを対象にする
+    genre_exact: bool = False
 
 
 class DedupRequest(BaseModel):
@@ -138,7 +142,11 @@ class ExcludePatternOut(BaseModel):
 class GenreCountOut(BaseModel):
     genre: str
     label_ja: str
+    # direct_count + 子の合計。サイドバーの親行に出す数字
     unread_count: int
+    # そのキーが直接付いている記事数（子ルールがまだ無いタグの記事）
+    direct_count: int = 0
+    children: list["GenreCountOut"] = []
 
 
 class GenreRuleOut(BaseModel):
@@ -151,6 +159,8 @@ class GenreOut(BaseModel):
     key: str
     label_ja: str
     priority: int
+    # NULL が親ジャンル。値を持つものが子（階層は 2 段固定）
+    parent_id: int | None = None
     # 管理 UI がチップの削除に rule id を使うので、タグ名だけでなく id も返す
     rules: list[GenreRuleOut] = []
     generic_rules: list[GenreRuleOut] = []
@@ -162,11 +172,15 @@ class GenreCreate(BaseModel):
     key: str
     label_ja: str
     priority: int = 100
+    parent_id: int | None = None
 
 
 class GenreUpdate(BaseModel):
     label_ja: str | None = None
     priority: int | None = None
+    # 明示的に None を送ると親を外してトップレベルへ上げる。
+    # 「未指定」と区別するため、ルーター側は model_fields_set を見る
+    parent_id: int | None = None
 
 
 class GenreRuleCreate(BaseModel):
@@ -176,6 +190,12 @@ class GenreRuleCreate(BaseModel):
 
 
 class ReclassifyResult(BaseModel):
+    reclassified: int
+
+
+class SeedSubgenresResult(BaseModel):
+    created: int
+    moved: int
     reclassified: int
 
 

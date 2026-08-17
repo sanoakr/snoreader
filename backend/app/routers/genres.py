@@ -18,6 +18,7 @@ from app.schemas import (
     GenreRuleOut,
     GenreUpdate,
     ReclassifyResult,
+    SeedSubgenresResult,
 )
 
 router = APIRouter(tags=["genres"])
@@ -32,6 +33,40 @@ async def _reclassify(session: AsyncSession) -> int:
     changed = await reclassify_all(session)
     await session.commit()
     return changed
+
+
+async def _validate_parent(
+    session: AsyncSession, parent_id: int | None, *, moving_id: int | None = None
+) -> None:
+    """親指定の妥当性を見る。階層は 2 段固定。"""
+    if parent_id is None:
+        return
+    parent = await session.get(Genre, parent_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent genre not found")
+    if parent.parent_id is not None:
+        # 親自身がすでに子なら、それを親にするのは 3 段目を作ることになる
+        raise HTTPException(status_code=400, detail="Genres can only nest one level deep")
+    if moving_id is not None and parent_id == moving_id:
+        # 自分自身を親にすると自己参照の循環になる
+        raise HTTPException(status_code=400, detail="A genre cannot be its own parent")
+    if moving_id is not None:
+        child_ids = {
+            gid
+            for (gid,) in (
+                await session.execute(select(Genre.id).where(Genre.parent_id == moving_id))
+            ).all()
+        }
+        # 自分の子を親にすると循環する
+        if parent_id in child_ids:
+            raise HTTPException(status_code=400, detail="A genre cannot be its own parent")
+        # 子を持つジャンルを子にすると 3 段になる。親自身が top-level かを見る
+        # だけでは塞げない: A(親) → B(子) を作った後で A を C の子にする、という
+        # 順序で C → A → B が作れてしまう
+        if child_ids:
+            raise HTTPException(
+                status_code=400, detail="A genre with children cannot become a child"
+            )
 
 
 async def _list_genres(session: AsyncSession) -> list[GenreOut]:
@@ -56,6 +91,7 @@ async def _list_genres(session: AsyncSession) -> list[GenreOut]:
                 key=genre.key,
                 label_ja=genre.label_ja,
                 priority=genre.priority,
+                parent_id=genre.parent_id,
                 rules=sorted(normal, key=lambda r: r.tag),
                 generic_rules=sorted(generic, key=lambda r: r.tag),
             )
@@ -80,7 +116,11 @@ async def create_genre(body: GenreCreate, session: AsyncSession = Depends(get_se
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Genre already exists")
 
-    genre = Genre(key=key, label_ja=body.label_ja.strip(), priority=body.priority)
+    await _validate_parent(session, body.parent_id)
+
+    genre = Genre(
+        key=key, label_ja=body.label_ja.strip(), priority=body.priority, parent_id=body.parent_id
+    )
     session.add(genre)
     await session.commit()
     await session.refresh(genre)
@@ -91,6 +131,7 @@ async def create_genre(body: GenreCreate, session: AsyncSession = Depends(get_se
         key=genre.key,
         label_ja=genre.label_ja,
         priority=genre.priority,
+        parent_id=genre.parent_id,
         reclassified=changed,
     )
 
@@ -106,6 +147,9 @@ async def update_genre(
         genre.label_ja = body.label_ja.strip()
     if body.priority is not None:
         genre.priority = body.priority
+    if "parent_id" in body.model_fields_set:
+        await _validate_parent(session, body.parent_id, moving_id=genre_id)
+        genre.parent_id = body.parent_id
     await session.commit()
     # priority を変えると解決順が変わるので再分類する
     changed = await _reclassify(session)
@@ -155,3 +199,19 @@ async def delete_genre_rule(rule_id: int, session: AsyncSession = Depends(get_se
     await session.delete(rule)
     await session.commit()
     return ReclassifyResult(reclassified=await _reclassify(session))
+
+
+@router.post("/genres/seed-subgenres", response_model=SeedSubgenresResult)
+async def seed_recommended_subgenres(session: AsyncSession = Depends(get_session)):
+    """推奨サブジャンルを投入する。
+
+    起動時の自動投入はしない。既存環境では数千件の genre 付け替えで FTS の
+    再インデックスが走り（実測 6,408 件で約 15 秒）、押していない利用者から
+    見れば「勝手に分類が変わった」になるため。
+    """
+    from app.services.genre_seed import seed_subgenres
+
+    created, moved = await seed_subgenres(session)
+    await session.commit()
+    changed = await _reclassify(session) if (created or moved) else 0
+    return SeedSubgenresResult(created=created, moved=moved, reclassified=changed)

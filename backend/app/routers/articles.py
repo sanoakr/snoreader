@@ -48,6 +48,7 @@ async def list_articles(
     tag_id: int | None = None,
     untagged: bool = False,
     genre: str | None = None,
+    genre_exact: bool = False,
     dismissed: bool = False,
     sort: str = "published_at",
     order: str = "desc",
@@ -74,8 +75,11 @@ async def list_articles(
         stmt = stmt.where(~Article.id.in_(select(ArticleTag.article_id)))
         count_stmt = count_stmt.where(~Article.id.in_(select(ArticleTag.article_id)))
     if genre is not None:
-        stmt = stmt.where(Article.genre == genre)
-        count_stmt = count_stmt.where(Article.genre == genre)
+        from app.services.genre_scope import genre_keys
+
+        keys = await genre_keys(session, genre, exact=genre_exact)
+        stmt = stmt.where(Article.genre.in_(keys))
+        count_stmt = count_stmt.where(Article.genre.in_(keys))
 
     # 通常の読書導線からは外し、Dismissed ビューでだけ見せる
     if dismissed:
@@ -107,9 +111,11 @@ async def list_articles(
 
 @router.get("/articles/genres", response_model=list[GenreCountOut])
 async def get_genre_counts(session: AsyncSession = Depends(get_session)):
-    """未読・未保存・未非表示の記事をジャンル別に数える。件数降順。"""
+    """未読・未保存・未非表示の記事をジャンル別に数える。親は子の合計を含む。件数降順。"""
     from app.services.genre_classifier import OTHER_GENRE
 
+    # 集計は変えない: 3 列だけを読む単一の group_by（本番 17,387 件で 0.16s）。
+    # 親子への畳み込みは軽量な Python 処理として後段に置く。
     rows = (
         await session.execute(
             select(Article.genre, func.count().label("cnt"))
@@ -120,19 +126,50 @@ async def get_genre_counts(session: AsyncSession = Depends(get_session)):
                 Article.genre.isnot(None),
             )
             .group_by(Article.genre)
-            .order_by(func.count().desc())
         )
     ).all()
+    direct = {genre: cnt for genre, cnt in rows}
 
-    labels = {
-        key: label
-        for key, label in (await session.execute(select(Genre.key, Genre.label_ja))).all()
-    }
-    labels[OTHER_GENRE] = "その他"
-    return [
-        GenreCountOut(genre=genre, label_ja=labels.get(genre, genre), unread_count=cnt)
-        for genre, cnt in rows
+    genre_rows = (
+        await session.execute(select(Genre.id, Genre.key, Genre.label_ja, Genre.parent_id))
+    ).all()
+    label_by_key = {key: label for _gid, key, label, _parent in genre_rows}
+    key_by_id = {gid: key for gid, key, _label, _parent in genre_rows}
+    children_keys: dict[str, list[str]] = {}
+    for _gid, key, _label, parent_id in genre_rows:
+        parent_key = key_by_id.get(parent_id) if parent_id is not None else None
+        if parent_key:
+            children_keys.setdefault(parent_key, []).append(key)
+
+    def node(key: str) -> GenreCountOut:
+        # 階層は 2 段固定だが、将来深くなっても壊れないよう再帰で畳む
+        children = [node(c) for c in children_keys.get(key, [])]
+        children = [c for c in children if c.unread_count > 0]
+        children.sort(key=lambda c: (-c.unread_count, c.genre))
+        own = direct.get(key, 0)
+        return GenreCountOut(
+            genre=key,
+            label_ja=label_by_key.get(key, key),
+            direct_count=own,
+            unread_count=own + sum(c.unread_count for c in children),
+            children=children,
+        )
+
+    # トップレベル = 親を持たないジャンル + 予約キー + 定義が消えた孤児キー
+    top_keys = [key for _gid, key, _label, parent_id in genre_rows if parent_id is None]
+    top_keys += [
+        key for key in direct if key not in label_by_key and key != OTHER_GENRE
     ]
+    if OTHER_GENRE in direct:
+        top_keys.append(OTHER_GENRE)
+
+    out = [node(key) for key in top_keys]
+    out = [n for n in out if n.unread_count > 0]
+    for n in out:
+        if n.genre == OTHER_GENRE:
+            n.label_ja = "その他"
+    out.sort(key=lambda n: (-n.unread_count, n.genre))
+    return out
 
 
 @router.get("/articles/recommended", response_model=PaginatedArticles)
@@ -578,9 +615,12 @@ async def mark_all_read(
     if body.feed_id is not None:
         stmt = stmt.where(Article.feed_id == body.feed_id)
     if body.genre is not None:
+        from app.services.genre_scope import genre_keys
+
         # 一括 dismiss が保存済みを保護する以上、genre 一括だけ保護しないのは非対称
+        keys = await genre_keys(session, body.genre, exact=body.genre_exact)
         stmt = stmt.where(
-            Article.genre == body.genre,
+            Article.genre.in_(keys),
             Article.is_saved == False,  # noqa: E712
         )
 
@@ -595,13 +635,16 @@ async def mark_all_read(
     return {"marked": count}
 
 
-def _dismiss_targets(body: DismissRequest, *, restoring: bool):
-    """dismiss / undismiss の対象を絞る WHERE 条件を組む。"""
+def _dismiss_targets(body: DismissRequest, *, restoring: bool, keys: list[str] | None):
+    """dismiss / undismiss の対象を絞る WHERE 条件を組む。
+
+    keys は genre を子孫まで展開したキー一覧（genre 指定が無ければ None）。
+    """
     conds = []
     if body.ids:
         conds.append(Article.id.in_(body.ids))
-    elif body.genre:
-        conds.append(Article.genre == body.genre)
+    elif keys:
+        conds.append(Article.genre.in_(keys))
         if not restoring:
             # UI の確認ダイアログは「未読 N 件」の unread_count を見せているので、
             # 実処理も未読に限定しないと確認件数と実処理件数がずれる（既読混入で桁違いになる）
@@ -623,9 +666,18 @@ async def dismiss_articles(
     if not body.ids and not body.genre:
         raise HTTPException(status_code=422, detail="Either genre or ids is required")
 
+    from app.services.genre_scope import genre_keys
+
+    keys = (
+        await genre_keys(session, body.genre, exact=body.genre_exact)
+        if body.genre
+        else None
+    )
     now = datetime.now(timezone.utc).isoformat()
     articles = (
-        await session.execute(select(Article).where(*_dismiss_targets(body, restoring=False)))
+        await session.execute(
+            select(Article).where(*_dismiss_targets(body, restoring=False, keys=keys))
+        )
     ).scalars().all()
     for article in articles:
         article.dismissed_at = now
@@ -642,8 +694,17 @@ async def undismiss_articles(
     if not body.ids and not body.genre:
         raise HTTPException(status_code=422, detail="Either genre or ids is required")
 
+    from app.services.genre_scope import genre_keys
+
+    keys = (
+        await genre_keys(session, body.genre, exact=body.genre_exact)
+        if body.genre
+        else None
+    )
     articles = (
-        await session.execute(select(Article).where(*_dismiss_targets(body, restoring=True)))
+        await session.execute(
+            select(Article).where(*_dismiss_targets(body, restoring=True, keys=keys))
+        )
     ).scalars().all()
     for article in articles:
         article.dismissed_at = None

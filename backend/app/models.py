@@ -90,10 +90,21 @@ class Genre(Base):
     label_ja: Mapped[str] = mapped_column(String, nullable=False)
     # 小さいほど優先。タグが複数ジャンルにヒットしたときの解決順
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    # NULL が親ジャンル。値を持つものが子。階層は 2 段固定（API 側で検証する）
+    parent_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("genres.id", ondelete="CASCADE"), nullable=True
+    )
     created_at: Mapped[str] = mapped_column(String, default=_utcnow)
 
     rules: Mapped[list["GenreRule"]] = relationship(
         back_populates="genre", cascade="all, delete-orphan"
+    )
+    # 親を消したら子も消える。SQLite の外部キー制約だけに頼らず ORM 側でも伝播させる
+    children: Mapped[list["Genre"]] = relationship(
+        back_populates="parent", cascade="all, delete-orphan"
+    )
+    parent: Mapped["Genre | None"] = relationship(
+        back_populates="children", remote_side="Genre.id"
     )
 
 
