@@ -266,9 +266,9 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
 
   const handleAcceptTag = (suggestion: TagSuggestion) => {
     if (!article.is_saved) {
-      // 未 Saved: auto_tag=false で保存してから clicked tag だけを追加
+      // 未 Saved: 先に保存してから、押された候補だけを追加する
       updateArticle.mutate(
-        { id: article.id, data: { is_saved: true, auto_tag: false } },
+        { id: article.id, data: { is_saved: true } },
         {
           onSuccess: () => {
             addTag.mutate({ articleId: article.id, name: suggestion.name, name_ja: suggestion.name_ja });
