@@ -9,7 +9,7 @@ LLM は記事をまたいだ語彙の一貫性を保てない（実測で語彙�
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,11 +33,37 @@ class GenreRules:
     tag_to_genre: dict[str, str]      # 通常ルール: tag -> genre key
     generic_to_genre: dict[str, str]  # 汎用ルール: tag -> genre key
     priority: dict[str, int]          # genre key -> priority（小さいほど優先）
+    # 子 key -> 親 key。キーを持たないジャンルは親（またはトップレベル）扱い
+    parent: dict[str, str] = field(default_factory=dict)
+
+    def ancestors(self, genre: str) -> set[str]:
+        """genre の祖先キー集合。階層は 2 段だが、循環しても止まるよう辿る。"""
+        seen: set[str] = set()
+        current = self.parent.get(genre)
+        while current and current not in seen:
+            seen.add(current)
+            current = self.parent.get(current)
+        return seen
+
+
+def _prune_ancestors(hits: list[str], rules: GenreRules) -> list[str]:
+    """候補の中に祖先と子孫が混在していたら祖先を落とす。
+
+    「より具体的な指定が勝つ」という規則。これが無いと、親を指す代表タグ
+    （ai など）を持つ記事が子ルールに当たっても親に残り、分割されない。
+    """
+    covered: set[str] = set()
+    for genre in hits:
+        covered |= rules.ancestors(genre)
+    pruned = [g for g in hits if g not in covered]
+    # 全滅（循環など異常なケース）のときは元の候補で解決する
+    return pruned or hits
 
 
 def _resolve(genres: list[str], rules: GenreRules) -> str:
     """候補ジャンルから priority 最小のものを返す。同値は key の辞書順で決める。"""
-    return min(genres, key=lambda g: (rules.priority.get(g, _FALLBACK_PRIORITY), g))
+    candidates = _prune_ancestors(genres, rules)
+    return min(candidates, key=lambda g: (rules.priority.get(g, _FALLBACK_PRIORITY), g))
 
 
 def classify(tags: list[str], rules: GenreRules) -> str:
@@ -59,6 +85,14 @@ async def load_rules(session: AsyncSession) -> GenreRules:
     ルール表は 150 行程度と小さいのでキャッシュは持たない。多数の記事を回す
     ときだけ、呼び出し側がループの外で 1 回呼ぶこと。
     """
+    genre_rows = (await session.execute(select(Genre.id, Genre.key, Genre.parent_id))).all()
+    key_by_id = {gid: key for gid, key, _parent in genre_rows}
+    parent: dict[str, str] = {}
+    for _gid, key, parent_id in genre_rows:
+        parent_key = key_by_id.get(parent_id) if parent_id is not None else None
+        if parent_key:
+            parent[key] = parent_key
+
     rows = (
         await session.execute(
             select(GenreRule.tag, GenreRule.is_generic, Genre.key, Genre.priority).join(
@@ -73,7 +107,10 @@ async def load_rules(session: AsyncSession) -> GenreRules:
     for tag, is_generic, key, prio in rows:
         (generic_to_genre if is_generic else tag_to_genre)[tag] = key
         priority[key] = prio
-    return GenreRules(tag_to_genre, generic_to_genre, priority)
+    # ルールを持たない親も priority を引けるようにする
+    for _gid, key, _parent_id in genre_rows:
+        priority.setdefault(key, _FALLBACK_PRIORITY)
+    return GenreRules(tag_to_genre, generic_to_genre, priority, parent)
 
 
 def parse_tags(raw: str | None) -> list[str]:

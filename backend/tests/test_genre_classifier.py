@@ -113,3 +113,59 @@ def test_classify_via_malformed_tag_suggestions_falls_back_to_other(rules: Genre
     """DB から取った tag_suggestions が list でない場合も other に落ちること（reclassify_all 相当の経路）。"""
     for raw in ("null", "42", '{"a": 1}', "{not valid json"):
         assert classify(parse_tags(raw), rules) == "other"
+
+
+@pytest.fixture
+def hierarchical_rules() -> GenreRules:
+    """ai(親) の下に ai_llm(子)、dev(親) の下に dev_general(子・汎用) を置いた構成。"""
+    return GenreRules(
+        tag_to_genre={
+            "ai": "ai",            # 親を指す代表タグ
+            "llm": "ai_llm",       # 子を指すタグ
+            "programming": "dev",
+            "baseball": "sports",
+        },
+        generic_to_genre={"technology": "dev_general"},
+        priority={"ai": 1, "ai_llm": 1, "dev": 3, "dev_general": 3, "sports": 4},
+        parent={"ai_llm": "ai", "dev_general": "dev"},
+    )
+
+
+def test_descendant_beats_ancestor(hierarchical_rules: GenreRules):
+    """代表タグ(ai)と子タグ(llm)が両方当たったら子を採る。
+
+    priority の手動調整に頼ると、代表タグを持つ記事が親に残り続けて分割されない。
+    """
+    assert classify(["ai", "llm"], hierarchical_rules) == "ai_llm"
+    assert classify(["llm", "ai"], hierarchical_rules) == "ai_llm"
+
+
+def test_parent_kept_when_no_child_rule_hits(hierarchical_rules: GenreRules):
+    """子ルールが無いタグの記事は親に残る（親自身の束になる）。"""
+    assert classify(["ai"], hierarchical_rules) == "ai"
+
+
+def test_unrelated_genres_still_resolve_by_priority(hierarchical_rules: GenreRules):
+    """祖先・子孫の関係が無い候補どうしは従来通り priority で決まる。"""
+    assert classify(["ai", "programming"], hierarchical_rules) == "ai"
+    assert classify(["baseball", "programming"], hierarchical_rules) == "dev"
+
+
+def test_child_genre_wins_over_unrelated_higher_priority(hierarchical_rules: GenreRules):
+    """子に降ろしても、親と同じ priority を与えていれば他ジャンルとの優劣は変わらない。"""
+    assert classify(["llm", "programming"], hierarchical_rules) == "ai_llm"
+
+
+def test_generic_stage_also_prunes_ancestors():
+    """汎用ルールの段でも子孫優先が効くこと。"""
+    rules = GenreRules(
+        tag_to_genre={},
+        generic_to_genre={"technology": "dev_general", "news": "dev"},
+        priority={"dev": 3, "dev_general": 3},
+        parent={"dev_general": "dev"},
+    )
+    assert classify(["technology", "news"], rules) == "dev_general"
+
+
+def test_other_is_not_part_of_the_hierarchy(hierarchical_rules: GenreRules):
+    assert classify(["unknown-tag"], hierarchical_rules) == "other"
