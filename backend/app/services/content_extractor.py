@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Literal
@@ -18,6 +19,26 @@ _GRAPHIC_RE = re.compile(r'<graphic\b([^>]*)/?>', re.IGNORECASE)
 _ATTR_SRC = re.compile(r'\bsrc="([^"]*)"')
 _ATTR_ALT = re.compile(r'\balt="([^"]*)"')
 _NESTED_PRE = re.compile(r'<pre>\s*<pre>(.*?)</pre>\s*</pre>', re.DOTALL)
+
+_IMG_TAG_RE = re.compile(r'<img\b[^>]*>', re.IGNORECASE)
+_IMG_SRC_ANY_QUOTE_RE = re.compile(r'\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
+_IMG_WIDTH_RE = re.compile(r'\bwidth=["\']?(\d+)', re.IGNORECASE)
+_IMG_HEIGHT_RE = re.compile(r'\bheight=["\']?(\d+)', re.IGNORECASE)
+_HAS_DIMENSION_RE = re.compile(r'\b(?:width|height)=', re.IGNORECASE)
+
+# 画像の寸法をリーダー側で予約するため、抽出時に width/height を埋める。
+# 属性が無いと読み込み完了まで高さ 0 のままで、本文を読んでいる最中に
+# 画像 1 枚ごとに数百 px 伸びてスクロール位置がずれる (WebKit はスクロール
+# アンカリング非対応なので補正されない)。
+# 先頭だけ読めば寸法は判るので Range 付きで取る。JPEG は SOF マーカーまで
+# 進む必要があるため多めに確保する。
+_IMAGE_HEAD_BYTES = 16384
+_IMAGE_PROBE_CONCURRENCY = 5
+_IMAGE_PROBE_TIMEOUT = 8.0
+# 1 記事あたりの実測本数上限 (画像を大量に貼るページで抽出が長引くのを防ぐ)
+_IMAGE_PROBE_LIMIT = 40
+# 寸法を読めない・読む意味がない拡張子
+_UNSIZED_IMAGE_SUFFIXES = ('.svg', '.svgz')
 
 # trafilatura が出力する <row>/<cell> を標準 HTML テーブルタグへ変換するパターン
 _ROW_RE = re.compile(r'<row\b([^>]*)>', re.IGNORECASE)
@@ -117,7 +138,182 @@ _META_CHARSET_RE = re.compile(
 )
 
 
-def _fix_html(html: str, base_url: str = "") -> str:
+def _absolute_src(src: str, base_url: str) -> str:
+    """相対 src を絶対 URL にする。base_url が無い場合はそのまま返す。"""
+    if base_url and src and not src.startswith(('http', '//', 'data:')):
+        return urljoin(base_url, src)
+    return src
+
+
+def _declared_image_sizes(source_html: str, base_url: str) -> dict[str, tuple[int, int]]:
+    """元ページの <img> が宣言している表示サイズを ``src -> (w, h)`` で返す。
+
+    trafilatura の ``<graphic>`` は src と alt しか持たないため、抽出後の HTML では
+    元ページが指定していた width/height が失われる。実ファイルの原寸で描画すると
+    26px のアイコンが 200px になるので、宣言値があればそれを最優先で使う。
+    """
+    sizes: dict[str, tuple[int, int]] = {}
+    for tag in _IMG_TAG_RE.findall(source_html):
+        src_m = _IMG_SRC_ANY_QUOTE_RE.search(tag)
+        w_m = _IMG_WIDTH_RE.search(tag)
+        h_m = _IMG_HEIGHT_RE.search(tag)
+        if not (src_m and w_m and h_m):
+            continue
+        width, height = int(w_m.group(1)), int(h_m.group(1))
+        if width <= 0 or height <= 0:
+            continue
+        sizes[_absolute_src(src_m.group(1), base_url)] = (width, height)
+    return sizes
+
+
+def _parse_image_size(head: bytes) -> tuple[int, int] | None:
+    """画像バイト列の先頭からピクセル寸法を読む (PNG / GIF / JPEG / WebP)。
+
+    ヘッダーだけで判るフォーマットのみ対応する。判定できなければ None。
+    """
+    if len(head) < 16:
+        return None
+
+    # PNG: IHDR チャンクに 32bit big-endian で幅・高さが入る
+    if head[:8] == b'\x89PNG\r\n\x1a\n' and head[12:16] == b'IHDR':
+        return (int.from_bytes(head[16:20], 'big'), int.from_bytes(head[20:24], 'big'))
+
+    # GIF: 論理画面記述子に 16bit little-endian
+    if head[:6] in (b'GIF87a', b'GIF89a'):
+        return (int.from_bytes(head[6:8], 'little'), int.from_bytes(head[8:10], 'little'))
+
+    # WebP: VP8 / VP8L / VP8X の 3 系統でヘッダー構造が違う
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        chunk = head[12:16]
+        if chunk == b'VP8X' and len(head) >= 30:
+            width = int.from_bytes(head[24:27], 'little') + 1
+            height = int.from_bytes(head[27:30], 'little') + 1
+            return (width, height)
+        if chunk == b'VP8 ' and len(head) >= 30:
+            width = int.from_bytes(head[26:28], 'little') & 0x3FFF
+            height = int.from_bytes(head[28:30], 'little') & 0x3FFF
+            return (width, height) if width and height else None
+        if chunk == b'VP8L' and len(head) >= 25:
+            bits = int.from_bytes(head[21:25], 'little')
+            return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+        return None
+
+    # JPEG: SOF マーカーを探す。マーカー間は長さフィールドで読み飛ばす
+    if head[:2] == b'\xff\xd8':
+        i = 2
+        end = len(head)
+        while i + 9 < end:
+            if head[i] != 0xFF:
+                i += 1
+                continue
+            marker = head[i + 1]
+            # スタンドアロンマーカー (パディング / RSTn) は長さを持たない
+            if marker in (0xFF, 0x01) or 0xD0 <= marker <= 0xD9:
+                i += 2
+                continue
+            length = int.from_bytes(head[i + 2:i + 4], 'big')
+            if length < 2:
+                return None
+            # SOF0-SOF15 (0xC4 DHT / 0xC8 JPG / 0xCC DAC は除く) が寸法を持つ
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                height = int.from_bytes(head[i + 5:i + 7], 'big')
+                width = int.from_bytes(head[i + 7:i + 9], 'big')
+                return (width, height) if width and height else None
+            i += 2 + length
+        return None
+
+    return None
+
+
+def _unsized_image_srcs(html: str) -> list[str]:
+    """width/height が無く、実測すれば埋められる <img> の src を重複なしで返す。"""
+    srcs: list[str] = []
+    seen: set[str] = set()
+    for tag in _IMG_TAG_RE.findall(html):
+        if _HAS_DIMENSION_RE.search(tag):
+            continue
+        src_m = _ATTR_SRC.search(tag)
+        if not src_m:
+            continue
+        src = src_m.group(1)
+        if not src.startswith(('http://', 'https://')):
+            continue
+        if src.split('?')[0].lower().endswith(_UNSIZED_IMAGE_SUFFIXES):
+            continue
+        if src in seen:
+            continue
+        seen.add(src)
+        srcs.append(src)
+    return srcs
+
+
+async def _probe_image_sizes(
+    client: httpx.AsyncClient, srcs: list[str]
+) -> dict[str, tuple[int, int]]:
+    """画像の先頭バイトだけ取得して ``src -> (w, h)`` を返す。失敗分は含めない。"""
+    sem = asyncio.Semaphore(_IMAGE_PROBE_CONCURRENCY)
+    headers = {
+        "User-Agent": _BROWSER_HEADERS["User-Agent"],
+        "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+        "Range": f"bytes=0-{_IMAGE_HEAD_BYTES - 1}",
+    }
+
+    async def probe(src: str) -> tuple[str, tuple[int, int] | None]:
+        async with sem:
+            try:
+                async with client.stream(
+                    "GET", src, headers=headers, timeout=_IMAGE_PROBE_TIMEOUT
+                ) as resp:
+                    if resp.status_code >= 400:
+                        return src, None
+                    buf = bytearray()
+                    async for chunk in resp.aiter_bytes():
+                        buf += chunk
+                        if len(buf) >= _IMAGE_HEAD_BYTES:
+                            break
+                return src, _parse_image_size(bytes(buf))
+            except Exception as e:  # ネットワーク失敗は寸法なしで諦める
+                logger.debug("画像サイズ取得失敗 %s: %s", src, e)
+                return src, None
+
+    results = await asyncio.gather(*(probe(s) for s in srcs))
+    return {src: size for src, size in results if size}
+
+
+def _apply_image_sizes(html: str, sizes: dict[str, tuple[int, int]]) -> str:
+    """寸法未指定の <img> に width/height を付ける。既に付いているタグは触らない。"""
+    if not sizes:
+        return html
+
+    def _fix(m: re.Match) -> str:
+        tag = m.group(0)
+        if _HAS_DIMENSION_RE.search(tag):
+            return tag
+        src_m = _ATTR_SRC.search(tag)
+        if not src_m:
+            return tag
+        size = sizes.get(src_m.group(1))
+        if not size:
+            return tag
+        return tag.replace('<img', f'<img width="{size[0]}" height="{size[1]}"', 1)
+
+    return _IMG_TAG_RE.sub(_fix, html)
+
+
+async def _reserve_image_space(client: httpx.AsyncClient, html: str) -> str:
+    """本文画像の高さを予約するため、寸法未指定の <img> を実測して埋める。"""
+    srcs = _unsized_image_srcs(html)
+    if not srcs:
+        return html
+    if len(srcs) > _IMAGE_PROBE_LIMIT:
+        logger.info("画像が多いため寸法実測を %d 件に制限", _IMAGE_PROBE_LIMIT)
+        srcs = srcs[:_IMAGE_PROBE_LIMIT]
+    return _apply_image_sizes(html, await _probe_image_sizes(client, srcs))
+
+
+def _fix_html(
+    html: str, base_url: str = "", image_sizes: dict[str, tuple[int, int]] | None = None
+) -> str:
     """Convert trafilatura-specific tags to standard HTML and fix image URLs."""
     def _graphic_to_img(m: re.Match) -> str:
         attrs = m.group(1)
@@ -125,8 +321,7 @@ def _fix_html(html: str, base_url: str = "") -> str:
         alt = _ATTR_ALT.search(attrs)
         src_val = src.group(1) if src else ""
         alt_val = alt.group(1) if alt else ""
-        if base_url and src_val and not src_val.startswith(('http', '//', 'data:')):
-            src_val = urljoin(base_url, src_val)
+        src_val = _absolute_src(src_val, base_url)
         return f'<img src="{src_val}" alt="{alt_val}" loading="lazy">'
 
     html = _GRAPHIC_RE.sub(_graphic_to_img, html)
@@ -165,10 +360,7 @@ def _fix_html(html: str, base_url: str = "") -> str:
     def _fix_img_tag(m: re.Match) -> str:
         tag = m.group(0)
         def _abs_src(sm: re.Match) -> str:
-            src = sm.group(1)
-            if base_url and src and not src.startswith(('http', '//', 'data:')):
-                src = urljoin(base_url, src)
-            return f'src="{src}"'
+            return f'src="{_absolute_src(sm.group(1), base_url)}"'
         tag = re.sub(r'src="([^"]*)"', _abs_src, tag)
         # Drop author/commentator profile images by CDN host
         src_m = re.search(r'src="https?://([^/"]+)', tag)
@@ -179,6 +371,9 @@ def _fix_html(html: str, base_url: str = "") -> str:
         return tag
 
     html = re.sub(r'<img\b[^>]*>', _fix_img_tag, html)
+
+    # 元ページが宣言していた表示サイズを復元する (実ファイルの原寸より優先)
+    html = _apply_image_sizes(html, image_sizes or {})
 
     # Qiita / note / KaTeX サイトが本文に埋める生の数式記法を
     # <code class="math-tex"> プレースホルダーへ変換する
@@ -517,7 +712,9 @@ def _extract_from_html(html: str | bytes, url: str) -> str | None:
             output_format="html",
         )
     if result:
-        result = _fix_html(result, base_url=url)
+        result = _fix_html(
+            result, base_url=url, image_sizes=_declared_image_sizes(html_str, url)
+        )
         if math_map:
             result = _restore_math(result, math_map)
     return result
@@ -594,7 +791,10 @@ async def extract_content(url: str) -> tuple[str | None, ExtractStatus | None]:
                     except Exception as e:
                         logger.warning("Failed to fetch %s: %s", next_url, e)
 
-            return _extract_from_html(_decoded_html(resp), str(resp.url)), None
+            html = _extract_from_html(_decoded_html(resp), str(resp.url))
+            if html:
+                html = await _reserve_image_space(client, html)
+            return html, None
 
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code

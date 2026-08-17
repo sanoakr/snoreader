@@ -25,6 +25,30 @@ body {
   margin: 0.5em 0;
 }
 
+/* アニメ GIF のタップ再生プレースホルダ。
+   GIF は放置中もデコードが走り続けて iOS 系ブラウザの画面全体再描画を招くため、
+   タップされるまで読み込まない。読み込み後と同じ高さの箱を置くので位置はずれない */
+.prose .gif-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0.5em 0;
+  border: 1px dashed #cbd5e1;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dark .prose .gif-play {
+  border-color: #475569;
+  background: #1e293b;
+  color: #94a3b8;
+}
+
 /* 掲示板・まとめサイト向け: blockquote をコメント風に */
 .prose blockquote {
   border-left: 3px solid #cbd5e1;
