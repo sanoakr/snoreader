@@ -180,9 +180,11 @@ genre スコープの意味を 1 つのヘルパに集約し、`GET /articles` /
 - `dev_infra` 「クラウド・インフラ」— `cloud` `aws` `linux` `windows` `microsoft` `network`
 - `dev_data` 「データ・DB」— `database` `data` `excel`
 - `dev_tools` 「ツール・ハード」— `tools` `software` `it` `performance` `hardware`
-- `dev_general` 「技術一般」— `technology`
+- `dev_general` 「技術一般」— `technology`（**`is_generic=True` のまま**移す。`GENERIC_SEED` の汎用ルールで、通常ルールが 1 つも当たらないときだけ使われる）
 
 閾値を超えているのは現状この 2 ジャンルだけなので、初期投入もこの 2 つに限る。`politics`（25）や `science`（20）は超えてから足す。
+
+汎用ルールも階層の対象になるため、子孫優先の枝刈りは通常ルール・汎用ルールの各段で行う。
 
 ## テスト
 
