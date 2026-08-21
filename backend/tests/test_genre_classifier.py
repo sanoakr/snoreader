@@ -1,11 +1,18 @@
 """タグ候補 → ジャンルの決定的な写像のテスト。
 
 分類は DB に触れない純関数なので、ルールを固定値で組んで検証する。
+load_rules() だけは DB から組み立てる側なので、そこだけ DB 付きで検証する。
 """
 
 from __future__ import annotations
 
+import importlib
+from collections.abc import AsyncIterator
+from pathlib import Path
+
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 from app.services.genre_classifier import GenreRules, classify, parse_tags
 
@@ -169,3 +176,72 @@ def test_generic_stage_also_prunes_ancestors():
 
 def test_other_is_not_part_of_the_hierarchy(hierarchical_rules: GenreRules):
     assert classify(["unknown-tag"], hierarchical_rules) == "other"
+
+
+# --- load_rules: DB から priority を組み立てる側の回帰テスト ---
+# (test_genres_api.py / test_subgenre_seed.py と同じ lifespan 付き client 作法)
+
+
+@pytest_asyncio.fixture
+async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("SNOREADER_DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+
+    from app import config as config_module
+
+    config_module.settings = config_module.Settings()  # type: ignore[assignment]
+
+    from app import database as database_module
+
+    importlib.reload(database_module)
+
+    from app import main as main_module
+
+    importlib.reload(main_module)
+
+    async with main_module.lifespan(main_module.app):
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+
+@pytest.mark.asyncio
+async def test_load_rules_uses_the_real_priority_for_a_rule_less_genre(
+    client: AsyncClient,
+) -> None:
+    """ルールを 1 つも持たない genre でも、priority は Genre.priority の実値になる。
+
+    ルールが 1 行も無い genre は tag_to_genre / generic_to_genre 経由では
+    絶対に priority を得られない（select が GenreRule -> Genre の join なので）。
+    そのフォールバックがセンチネル (_FALLBACK_PRIORITY) を返すと、
+    genre_split_planner が新しい兄弟に「親と同じ priority」を継がせる際、
+    親（この genre）がルールを失った途端に新しい兄弟が既存兄弟とのタイブレークに
+    必ず負けて 0 件案として棄却されてしまう（本タスクで見つけた実バグ）。
+    """
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Genre, GenreRule
+    from app.services.genre_classifier import _FALLBACK_PRIORITY, load_rules
+
+    async with async_session() as session:
+        ruled = Genre(key="ruled_genre", label_ja="ルール有り", priority=5)
+        # seed-subgenres が親の全タグを子へ譲るのと同じ状況: genres に行はあるが
+        # genre_rules は 1 行も無い
+        ruleless = Genre(key="ruleless_genre", label_ja="ルール無し", priority=7)
+        session.add_all([ruled, ruleless])
+        await session.flush()
+        session.add(GenreRule(tag="ruled-tag", genre_id=ruled.id, is_generic=False))
+        await session.commit()
+
+    async with async_session() as session:
+        rules = await load_rules(session)
+        # 念のため DB 上の実値と一致することも確認する
+        stored_priority = await session.scalar(
+            select(Genre.priority).where(Genre.key == "ruleless_genre")
+        )
+
+    assert rules.priority["ruled_genre"] == 5  # 従来通り、ルール経由で得られる
+    assert rules.priority["ruleless_genre"] == 7  # センチネルではなく実値
+    assert rules.priority["ruleless_genre"] != _FALLBACK_PRIORITY
+    assert rules.priority["ruleless_genre"] == stored_priority

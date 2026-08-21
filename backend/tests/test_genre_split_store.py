@@ -395,22 +395,13 @@ async def test_refresh_dismissed_floor_falls_back_to_before_count_when_count_is_
     assert third > 0
 
 
+
+
 @pytest.mark.asyncio
 async def test_apply_creates_children_moves_rules_and_reclassifies(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """適用で子が作られ、ルールが移り、記事が再分類される。
-
-    seed-subgenres は使わない。"ai" のように自分の元タグを全部子へ譲った
-    親ジャンルは GenreRule を 1 行も持たなくなり、load_rules の
-    「ルールを持たない親も priority を引けるようにする」フォールバックが
-    実際には _FALLBACK_PRIORITY（Genre.priority の実値ではない）を返してしまう
-    既存の別バグに当たり、promote_free_tags の新兄弟が常に既存兄弟に
-    タイブレークで負けて 0 件案として棄却される（このタスクの対象外の
-    genre_classifier.load_rules / genre_split_planner 側の話なので、ここでは
-    そのバグを踏まない「子を持たないトップレベル (security) がそのまま
-    ルールを持つ」構成を使う）。
-    """
+    """適用で子が作られ、ルールが移り、記事が再分類される。"""
     from sqlalchemy import select
 
     from app.ai import genre_namer
@@ -427,10 +418,9 @@ async def test_apply_creates_children_moves_rules_and_reclassifies(
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
 
-    # security (子を持たないトップレベル) を上限超にする。python は dev 所属の
-    # 既存ルールタグ（demote_generic 成立用）、monitoring は未ルールタグ
-    # （promote_free_tags 成立用）
-    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+    await client.post("/api/genres/seed-subgenres")
+    # ai + 未ルールタグ agent の記事を多く作り、promote_free_tags が成立する状況にする
+    await _make_articles([('["ai", "agent"]', 30), ('["ai"]', 30)])
 
     async with async_session() as session:
         await refresh_split_suggestions(session)
@@ -483,9 +473,8 @@ async def test_apply_overrides_child_labels(
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
 
-    # test_apply_creates_children_moves_rules_and_reclassifies と同じ理由で
-    # seed-subgenres は使わず、子を持たないトップレベル (security) を使う
-    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+    await client.post("/api/genres/seed-subgenres")
+    await _make_articles([('["ai", "agent"]', 30), ('["ai"]', 30)])
 
     async with async_session() as session:
         await refresh_split_suggestions(session)
@@ -495,14 +484,14 @@ async def test_apply_overrides_child_labels(
         rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
         target = next(r for r in rows if payload_to_proposal(r.payload).children)
         child_key = payload_to_proposal(target.payload).children[0].key
-        await apply_suggestion(session, target.id, labels={child_key: "監視"})
+        await apply_suggestion(session, target.id, labels={child_key: "AIエージェント"})
         await session.commit()
 
     async with async_session() as session:
         genre = (
             await session.execute(select(Genre).where(Genre.key == child_key))
         ).scalar_one()
-        assert genre.label_ja == "監視"
+        assert genre.label_ja == "AIエージェント"
 
 
 @pytest.mark.asyncio
@@ -522,9 +511,8 @@ async def test_apply_closes_the_other_pending_proposals_for_the_same_genre(
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
 
-    # この構成では security に対して demote_generic と promote_free_tags の
-    # 両方が成立し、同じ genre_key の保留中の案が 2 件になる
-    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+    await client.post("/api/genres/seed-subgenres")
+    await _make_articles([('["ai", "agent"]', 30), ('["ai", "security"]', 30), ('["ai"]', 10)])
 
     async with async_session() as session:
         await refresh_split_suggestions(session)
@@ -565,9 +553,8 @@ async def test_dismiss_suppresses_until_the_count_grows(
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
 
-    # security + 未ルールタグ monitoring で promote_free_tags のみが成立する
-    # 状況にする（python 抜きなら demote_generic は不成立のまま）
-    await _make_articles([('["security"]', 30), ('["security", "monitoring"]', 25)])
+    await client.post("/api/genres/seed-subgenres")
+    await _make_articles([('["ai", "agent"]', 30), ('["ai"]', 30)])
 
     async with async_session() as session:
         await refresh_split_suggestions(session)
@@ -584,7 +571,65 @@ async def test_dismiss_suppresses_until_the_count_grows(
         await session.commit()
 
     # 未読が増えたら再提案される
-    await _make_articles([('["security", "monitoring"]', 20)])
+    await _make_articles([('["ai"]', 20)])
     async with async_session() as session:
         assert await refresh_split_suggestions(session) > 0
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_apply_to_a_childless_top_level_genre_makes_children_of_it(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """子を持たないトップレベルジャンルに適用すると、新しい子はそのジャンル自身の
+    子になる（兄弟ではない）。
+
+    上の `test_apply_creates_children_moves_rules_and_reclassifies` は
+    seed-subgenres 後の "ai_misc"（すでに子）を使うので、新しい子が
+    「兄弟」になる分岐だけを通る。このテストは "security"（子を持たない
+    トップレベル）を使い、「新しい子はそのジャンル自身の子になる」という
+    もう一方の分岐（このタスクの核となる階層規則）を別途固定する。
+    seed-subgenres は呼ばない。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    # security (子を持たないトップレベル) を上限超にする。monitoring は
+    # 未ルールタグ（promote_free_tags で新しい子になる）
+    await _make_articles([('["security"]', 30), ('["security", "monitoring"]', 25)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if payload_to_proposal(r.payload).children)
+        child_key = payload_to_proposal(target.payload).children[0].key
+        await apply_suggestion(session, target.id)
+        await session.commit()
+
+    async with async_session() as session:
+        security = (
+            await session.execute(select(Genre).where(Genre.key == "security"))
+        ).scalar_one()
+        child = (
+            await session.execute(select(Genre).where(Genre.key == child_key))
+        ).scalar_one()
+        # 兄弟ではなく security 自身の子になっている
+        assert child.parent_id == security.id
+        # 兄弟の場合と同じ規則で親の priority を継ぐ（この場合は親 = security 自身）
+        assert child.priority == security.priority
