@@ -41,6 +41,140 @@ class SplitProposal:
     demote_tags: tuple[str, ...] = ()
 
 
+def _leaf_keys(rules: GenreRules) -> set[str]:
+    """子を持たないジャンルキー。parent の値に現れるキーは親なので除く。"""
+    all_keys = set(rules.priority)
+    parents = set(rules.parent.values())
+    return all_keys - parents
+
+
+def _current_counts(articles: list[tuple[int, list[str]]], rules: GenreRules) -> Counter[str]:
+    return Counter(classify(tags, rules) for _aid, tags in articles)
+
+
+def _simulate(
+    articles: list[tuple[int, list[str]]],
+    rules: GenreRules,
+    *,
+    tag_moves: dict[str, str],
+    demote: set[str],
+    new_priorities: dict[str, int] | None = None,
+    new_parents: dict[str, str] | None = None,
+) -> Counter[str]:
+    """候補ルールで実際に分類し直した件数を返す。推測しない。
+
+    new_parents は新しく提案する子キー -> 親キーの対応。これを渡さないと
+    新キーが rules.parent に登録されないまま classify に渡り、_prune_ancestors
+    の「祖先と子孫が混在したら祖先を落とす」規則が働かず、適用後の実際の
+    分類結果とシミュレーションが食い違ってしまう。
+    """
+    tag_to_genre = dict(rules.tag_to_genre)
+    generic_to_genre = dict(rules.generic_to_genre)
+    for tag, genre in tag_moves.items():
+        tag_to_genre[tag] = genre
+    for tag in demote:
+        if tag in tag_to_genre:
+            generic_to_genre[tag] = tag_to_genre.pop(tag)
+    priority = dict(rules.priority)
+    priority.update(new_priorities or {})
+    parent = dict(rules.parent)
+    parent.update(new_parents or {})
+    candidate = replace(
+        rules,
+        tag_to_genre=tag_to_genre,
+        generic_to_genre=generic_to_genre,
+        priority=priority,
+        parent=parent,
+    )
+    return Counter(classify(tags, candidate) for _aid, tags in articles)
+
+
+def _own_tags(genre_key: str, rules: GenreRules) -> list[str]:
+    return [t for t, g in rules.tag_to_genre.items() if g == genre_key]
+
+
+def _sibling_key(parent_key: str, tag: str) -> str:
+    """新しい兄弟のキー。親キーの接頭辞を保ち、タグ名の非英数字を _ にする。"""
+    slug = "".join(ch if ch.isalnum() else "_" for ch in tag.lower())
+    return f"{parent_key}_{slug}"
+
+
+def _plan_split_own_tags(
+    genre_key: str,
+    articles: list[tuple[int, list[str]]],
+    rules: GenreRules,
+    *,
+    limit: int,
+) -> SplitProposal | None:
+    """担当タグを件数降順に貪欲に詰め、最多タグは元ジャンルに残す。"""
+    before = _current_counts(articles, rules)[genre_key]
+    own = _own_tags(genre_key, rules)
+    if len(own) < 2:
+        return None
+
+    # このジャンルに落ちている記事だけを見てタグ件数を数える
+    mine = [(aid, tags) for aid, tags in articles if classify(tags, rules) == genre_key]
+    tag_counts = Counter(t for _aid, tags in mine for t in tags if t in own)
+    ranked = [t for t, _c in tag_counts.most_common() if tag_counts[t] > 0]
+    if len(ranked) < 2:
+        return None
+
+    # 最多タグ（受け皿）は元ジャンルに残す。残りを貪欲にビンへ詰める
+    movable = ranked[1:]
+    bin_cap = max(1, int(limit * _BIN_FILL_RATIO))
+    parent_key = rules.parent.get(genre_key, genre_key)
+
+    bins: list[list[str]] = []
+    for tag in movable:
+        for b in bins:
+            if sum(tag_counts[t] for t in b) + tag_counts[tag] <= bin_cap:
+                b.append(tag)
+                break
+        else:
+            if len(bins) >= _MAX_NEW_CHILDREN:
+                break
+            bins.append([tag])
+    if not bins:
+        return None
+
+    tag_moves: dict[str, str] = {}
+    keys: list[str] = []
+    for b in bins:
+        key = _sibling_key(parent_key, b[0])
+        if key == genre_key:
+            return None  # 受け皿と衝突するキーは作れない
+        keys.append(key)
+        for tag in b:
+            tag_moves[tag] = key
+
+    projected = _simulate(
+        articles,
+        rules,
+        tag_moves=tag_moves,
+        demote=set(),
+        new_priorities={k: rules.priority.get(parent_key, 100) for k in keys},
+        new_parents={k: parent_key for k in keys},
+    )
+    children = tuple(
+        ProposedChild(key=key, label_ja=b[0], tags=tuple(b), estimated_unread=projected[key])
+        for key, b in zip(keys, bins)
+    )
+    # 1 件も引き取れない子が混ざる案は、キーの辞書順で負けている。棄却する
+    if any(c.estimated_unread == 0 for c in children):
+        return None
+    if projected[genre_key] > limit:
+        return None
+    # movable[0] (= ranked[0] の次) 以降を各ビンに詰めているので、最多タグは
+    # ranked[0] のまま元ジャンルに残っている（tag_moves に含めていない）
+    return SplitProposal(
+        genre_key=genre_key,
+        strategy="split_own_tags",
+        before=before,
+        projected_max=max(projected.values()),
+        children=children,
+    )
+
+
 def plan_splits(
     articles: list[tuple[int, list[str]]],
     rules: GenreRules,
@@ -50,6 +184,16 @@ def plan_splits(
     """上限を超えた葉ジャンルごとに、成立した分割案を全部返す。
 
     articles は (article_id, tags) の列。rules のスナップショットで分類した
-    結果が上限を超えたジャンルだけを対象にする。
+    結果が上限を超えたジャンルだけを対象にする。案は projected_max 昇順。
     """
-    return []
+    counts = _current_counts(articles, rules)
+    leaves = _leaf_keys(rules) | {OTHER_GENRE}
+    over = sorted(k for k, c in counts.items() if c > limit and k in leaves)
+
+    proposals: list[SplitProposal] = []
+    for genre_key in over:
+        found = _plan_split_own_tags(genre_key, articles, rules, limit=limit)
+        if found:
+            proposals.append(found)
+    proposals.sort(key=lambda p: (p.projected_max, p.genre_key, p.strategy))
+    return proposals
