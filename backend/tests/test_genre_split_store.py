@@ -846,3 +846,36 @@ async def test_apply_raises_when_a_child_key_collides_with_an_unrelated_genre(
         # 提案自体もまだ保留中（閉じられていない）
         suggestion = await session.get(GenreSplitSuggestion, target_id)
         assert suggestion is not None and suggestion.dismissed_at is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_feeds_refreshes_split_suggestions(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """フィード取得サイクルの末尾で提案が更新される。"""
+    called: list[bool] = []
+
+    from app.services import feed_fetcher, genre_split_store
+
+    async def fake_refresh(session):
+        called.append(True)
+        return 0
+
+    monkeypatch.setattr(genre_split_store, "refresh_split_suggestions", fake_refresh)
+    await feed_fetcher.fetch_all_feeds()
+
+    assert called == [True]
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_feeds_survives_a_failing_refresh(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """提案生成が落ちてもフィード取得は失敗しない（取得の方が重要）。"""
+    from app.services import feed_fetcher, genre_split_store
+
+    async def boom(session):
+        raise RuntimeError("planner exploded")
+
+    monkeypatch.setattr(genre_split_store, "refresh_split_suggestions", boom)
+    await feed_fetcher.fetch_all_feeds()  # 例外が漏れないこと

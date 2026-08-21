@@ -171,3 +171,15 @@ async def fetch_all_feeds() -> None:
     async with async_session() as session:
         await dedup_articles(session)
         await cleanup_old_articles(session)
+
+    # 未読が増えるのはフィードを取得した瞬間だけなので、上限超の検知はここで 1 回。
+    # ここが失敗しても取得サイクル自体は成功扱いにする（取得の方が重要な機能なので、
+    # 提案生成の不具合でフィード取得まで止めてはいけない）
+    from app.services import genre_split_store
+
+    async with async_session() as session:
+        try:
+            await genre_split_store.refresh_split_suggestions(session)
+            await session.commit()
+        except Exception:
+            logger.exception("Failed to refresh genre split suggestions")
