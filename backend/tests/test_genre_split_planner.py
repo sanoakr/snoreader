@@ -128,6 +128,65 @@ def test_split_own_tags_rejects_sibling_key_colliding_with_existing_genre() -> N
     assert proposals == []
 
 
+def test_split_own_tags_rejects_a_phantom_child_that_ties_the_receptacle() -> None:
+    """1 件も引き取れない子が混ざる案は、他の全ガードを通っても丸ごと棄却される。
+
+    python が受け皿（30 件 = python 単独 10 件 + python+rust 20 件）。api は
+    30 件で綺麗に dev_api へ移り、それだけで dev_prog は 30 件（上限未満）に
+    下がる——つまり estimated_unread == 0 ガード以外の全チェック
+    （projected[genre_key] <= limit、projected_max <= limit、キー衝突なし）は
+    すでに通っている。しかし rust 付きの記事は必ず python も持つため、
+    dev_rust は dev_prog と同じ priority でタイになり、辞書順で
+    "dev_prog" < "dev_rust" のため必ず負ける（0 件）。この phantom な
+    dev_rust が混ざっている以上、案（dev_api の分も含めて）は丸ごと
+    棄却されなければならない。
+
+    直後の test_split_own_tags_succeeds_once_the_phantom_tag_is_removed が、
+    rust タグだけを外せば同じ rules で普通に split_own_tags が成立することを
+    示す——つまりここで [] になるのは「セットアップ自体が壊れているから」
+    ではなく「phantom な子が混ざっているから」であることを裏付ける
+    （この裏付けが無いと、このテストは何か無関係な理由で棄却されても
+    同じように通ってしまい、estimated_unread == 0 ガードを検出できない）。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"python": "dev_prog", "api": "dev_prog", "rust": "dev_prog"},
+        priority={"dev": 3, "dev_prog": 3},
+        parent={"dev_prog": "dev"},
+    )
+    articles = (
+        [(i, ["python"]) for i in range(10)]
+        + [(100 + i, ["python", "rust"]) for i in range(20)]
+        + [(200 + i, ["api"]) for i in range(30)]
+    )
+
+    assert plan_splits(articles, rules, limit=50) == []
+
+
+def test_split_own_tags_succeeds_once_the_phantom_tag_is_removed() -> None:
+    """上のテストと同じ rules・同じ記事総数で rust タグだけを外すと、普通に
+    split_own_tags が成立する。これにより上のテストの [] が「セットアップが
+    壊れているから」ではないことを確認できる。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"python": "dev_prog", "api": "dev_prog", "rust": "dev_prog"},
+        priority={"dev": 3, "dev_prog": 3},
+        parent={"dev_prog": "dev"},
+    )
+    # rust タグを外した以外は上のテストと同じ記事構成（python 30 件 + api 30 件）
+    articles = [(i, ["python"]) for i in range(30)] + [(200 + i, ["api"]) for i in range(30)]
+
+    proposals = [p for p in plan_splits(articles, rules, limit=50) if p.strategy == "split_own_tags"]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.genre_key == "dev_prog"
+    assert proposal.children
+    assert all(c.estimated_unread > 0 for c in proposal.children)
+
+
 def test_demote_generic_shrinks_a_receptacle_genre_without_adding_children() -> None:
     """担当タグが 1 つの受け皿が超過したら、そのタグを汎用に降格して他ジャンルに譲る。
 
