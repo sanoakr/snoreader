@@ -387,6 +387,8 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+    // モーダルが開いている間は背後のリストを動かさない（矢印はモーダルのスクロールに使う）
+    if (document.body.dataset.modalOpen) return;
 
     const currentIndex = displayArticles.findIndex(a => a.id === selectedId);
 

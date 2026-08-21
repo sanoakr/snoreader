@@ -157,6 +157,7 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
       if (e.key !== ' ') return;
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      if (document.body.dataset.modalOpen) return;
       e.preventDefault();
       const amount = window.innerHeight * 0.8;
       containerRef.current?.scrollBy({ top: e.shiftKey ? -amount : amount, behavior: 'smooth' });

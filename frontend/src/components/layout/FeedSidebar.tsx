@@ -334,6 +334,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             <GenreManagerModal
               filters={filters}
               onFilterChange={onFilterChange}
+              onClose={() => setShowGenreManager(false)}
               onNavigateToOther={() => {
                 setShowGenreManager(false);
                 onFilterChange({ ...filters, genre: 'other', genre_exact: undefined, dismissed: undefined });
