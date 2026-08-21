@@ -85,7 +85,7 @@ class SplitProposal:
     genre_key: str           # 超過している葉ジャンル
     strategy: str            # "demote_generic" | "split_own_tags" | "promote_free_tags"
     before: int
-    projected_max: int       # 適用後の最大バケット（シミュレーション結果）
+    projected_max: int       # この案が影響するバケットの最大件数（シミュレーション結果）
     children: tuple[ProposedChild, ...]
     demote_tags: tuple[str, ...]   # demote_generic 用
 ```
@@ -115,6 +115,22 @@ class SplitProposal:
 この失敗は「projected 件数 0」として自動的に検出され、案は棄却される。
 
 棄却理由は提案に残さず、単に候補から落とす。
+
+### `projected_max` は corpus 全体の最大値ではない
+
+`projected_max` は「この案が影響するバケット」——適用の前後で件数が変化した
+ジャンル（受け取った側と失った側の両方）と対象ジャンル自身——の最大件数である。
+corpus 全体の最大値を採ると、**無関係なジャンルが 1 つ上限を超えているだけで
+正しい案が全部棄却される**（戦略 C は「譲られた側が溢れないこと」を
+`max(projected.values()) > limit` で見るため）。本番では `other` が 46 件あり、
+これが 51 に育った瞬間に `ai_misc` の降格案が出なくなる、という形で仕組み全体が
+無言で止まる。実装は `_affected_max(current, projected, genre_key)` に閉じ込める。
+
+### 新しいキーは既存ジャンルと衝突してはならない
+
+新兄弟・新トップレベルのキーが既存ジャンルのキーと一致する案は棄却する。
+適用すると既存ジャンルを別の親の下に付け替え priority も上書きしてしまう
+（データ破壊）。同一案の中でのキー重複も同様に棄却する。
 
 ### 定数
 
