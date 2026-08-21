@@ -218,6 +218,9 @@ class SplitSuggestionOut(BaseModel):
     children: list[ProposedChildOut] = []
     demote_tags: list[str] = []
     created_at: str
+    # バックエンドの有効な genre_unread_limit（env で上書きされうる）。
+    # フロントエンドがこの値をハードコードしないよう、都度ここで渡す
+    limit: int
 
 
 class ApplySuggestionBody(BaseModel):

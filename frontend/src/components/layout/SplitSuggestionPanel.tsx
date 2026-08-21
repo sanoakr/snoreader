@@ -13,9 +13,6 @@ const STRATEGY_LABEL: Record<string, string> = {
   promote_free_tags: '未ルールのタグを兄弟ジャンルに昇格',
 };
 
-// ジャンルの上限件数。バックエンドの検知閾値と同じ値を表示に使う
-const GENRE_UNREAD_LIMIT = 50;
-
 // 分割案の提示と適用。件数はバックエンドで実際に分類し直した実測値なので、
 // ここでは計算せず表示するだけ。
 export function SplitSuggestionPanel() {
@@ -47,7 +44,11 @@ export function SplitSuggestionPanel() {
           type="button"
           className="text-xs text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
           disabled={refresh.isPending}
-          onClick={() => refresh.mutate()}
+          onClick={() =>
+            refresh.mutate(undefined, {
+              onError: (err) => alert((err as Error).message),
+            })
+          }
         >
           再計算
         </button>
@@ -65,7 +66,7 @@ export function SplitSuggestionPanel() {
           className="rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-700 dark:bg-amber-950"
         >
           <div className="font-medium text-amber-900 dark:text-amber-200">
-            ⚠ {s.genre_key} の未読が {s.before} 件(上限 {GENRE_UNREAD_LIMIT})
+            ⚠ {s.genre_key} の未読が {s.before} 件(上限 {s.limit})
           </div>
           <div className="mt-1 text-gray-700 dark:text-gray-300">
             {STRATEGY_LABEL[s.strategy] ?? s.strategy}
@@ -77,11 +78,6 @@ export function SplitSuggestionPanel() {
           {s.strategy === 'demote_generic' && s.demote_tags.length > 0 && (
             <div className="mt-1 text-gray-600 dark:text-gray-400">
               {s.demote_tags.map((tag) => `ルール ${tag} を汎用に降格`).join(', ')}
-            </div>
-          )}
-          {s.strategy !== 'demote_generic' && s.demote_tags.length > 0 && (
-            <div className="mt-1 text-gray-600 dark:text-gray-400">
-              降格するタグ: {s.demote_tags.join(', ')}
             </div>
           )}
 
@@ -117,6 +113,7 @@ export function SplitSuggestionPanel() {
                       setLastResult(
                         `ジャンル ${r.created} 件作成 / ルール ${r.moved} 件変更 / 記事 ${r.reclassified} 件再分類`,
                       ),
+                    onError: (err) => alert((err as Error).message),
                   },
                 );
               }}
@@ -127,7 +124,11 @@ export function SplitSuggestionPanel() {
               type="button"
               className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
               disabled={dismiss.isPending}
-              onClick={() => dismiss.mutate(s.id)}
+              onClick={() =>
+                dismiss.mutate(s.id, {
+                  onError: (err) => alert((err as Error).message),
+                })
+              }
             >
               無視
             </button>

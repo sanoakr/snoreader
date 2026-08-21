@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_session
 from app.models import Genre, GenreRule, GenreSplitSuggestion
 from app.schemas import (
@@ -180,6 +181,7 @@ async def list_split_suggestions(session: AsyncSession = Depends(get_session)):
                 ],
                 demote_tags=list(proposal.demote_tags),
                 created_at=row.created_at,
+                limit=settings.genre_unread_limit,
             )
         )
     return out

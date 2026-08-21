@@ -148,4 +148,5 @@ export interface SplitSuggestion {
   children: ProposedChild[];
   demote_tags: string[];
   created_at: string;
+  limit: number;
 }
