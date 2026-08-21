@@ -223,3 +223,24 @@ def test_promote_free_tags_on_other_creates_top_level_genres() -> None:
     assert proposal.genre_key == "other"
     assert {c.key for c in proposal.children} == {"football", "drone"}
     assert proposal.projected_max <= 50
+
+
+def test_a_sibling_key_sorting_after_the_receptacle_is_rejected() -> None:
+    """受け皿より辞書順で後になる兄弟キーの案は棄却される。
+
+    兄弟は親と同じ priority を持つので必ず同順位になり、_resolve の同値解決
+    （キーの辞書順）で決まる。受け皿より後にソートされるキーの新兄弟は
+    記事を 1 件も取れない。シミュレーションがこれを projected 0 で検出する。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    # 受け皿は ai_aaa（辞書順で最初）。新兄弟 ai_zzz は必ず負ける
+    rules = _rules({"ai": "ai_aaa"}, priority={"ai": 1, "ai_aaa": 1}, parent={"ai_aaa": "ai"})
+    articles = (
+        [(i, ["ai", "zzz"]) for i in range(30)]
+        + [(100 + i, ["ai"]) for i in range(30)]
+    )
+
+    for proposal in plan_splits(articles, rules, limit=50):
+        # 提案されたどの子も、必ず 1 件以上引き取れている
+        assert all(c.estimated_unread > 0 for c in proposal.children)
