@@ -111,7 +111,7 @@ async def test_refresh_stores_a_proposal_for_an_over_limit_genre(
     from app.models import GenreSplitSuggestion
     from app.services.genre_split_store import refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -143,7 +143,7 @@ async def test_refresh_is_idempotent_while_a_proposal_is_pending(
     from app.models import GenreSplitSuggestion
     from app.services.genre_split_store import refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -171,7 +171,7 @@ async def test_refresh_makes_no_proposal_when_all_genres_are_small(
     from app.database import async_session
     from app.services.genre_split_store import refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -200,7 +200,7 @@ async def test_refresh_suppresses_a_dismissed_proposal_while_unread_count_is_unc
     from app.models import GenreSplitSuggestion
     from app.services.genre_split_store import refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -245,7 +245,7 @@ async def test_refresh_reproposes_a_dismissed_genre_once_unread_count_grows(
     from app.models import GenreSplitSuggestion
     from app.services.genre_split_store import refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -360,7 +360,7 @@ async def test_refresh_dismissed_floor_falls_back_to_before_count_when_count_is_
     from app.models import GenreSplitSuggestion
     from app.services.genre_split_store import refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -413,7 +413,7 @@ async def test_apply_creates_children_moves_rules_and_reclassifies(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -447,9 +447,12 @@ async def test_apply_creates_children_moves_rules_and_reclassifies(
         # 適用したら記事の genre が実際に動いている
         assert reclassified > 0
         assert (await session.execute(select(Article))).scalars().first() is not None
-        # 適用した行は閉じている
+        # 適用した行は削除されている。以前はフロアを立てて閉じるだけだったが、
+        # それだと未読が再び増えても同じジャンルが上限(limit, before] の帯で
+        # 抑制され続けるバグがあった。apply は「断られた」わけではないので、
+        # フロアを立てず単に消す(#1)
         applied = await session.get(GenreSplitSuggestion, target.id)
-        assert applied is not None and applied.dismissed_at is not None
+        assert applied is None
 
 
 @pytest.mark.asyncio
@@ -468,7 +471,7 @@ async def test_apply_overrides_child_labels(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -495,10 +498,18 @@ async def test_apply_overrides_child_labels(
 
 
 @pytest.mark.asyncio
-async def test_apply_closes_the_other_pending_proposals_for_the_same_genre(
+async def test_apply_deletes_every_pending_proposal_across_all_genres(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """1 つ適用すると、同ジャンルの他の案も閉じる（projected_max が無効になるため）。"""
+    """1 つ適用すると、辞書が変わって全ジャンルの projected が無効になるので、
+    ジャンルを問わず保留中の提案を全部消す（#4a）。
+
+    以前はこのシナリオが「同じジャンルに複数案が立つか」に依存する上に、
+    立たなければ pytest.skip で自分自身を無効化していた——このブランチが
+    既に 2 回踏んだ「自己無効化するテスト」という失敗モードを繰り返さない
+    ため、skip を削除し、シナリオが本当に複数案（かつ他ジャンルの案も）を
+    生んだことをアサートで固定する。
+    """
     from sqlalchemy import select
 
     from app.ai import genre_namer
@@ -506,13 +517,23 @@ async def test_apply_closes_the_other_pending_proposals_for_the_same_genre(
     from app.models import GenreSplitSuggestion
     from app.services.genre_split_store import apply_suggestion, refresh_split_suggestions
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
 
     await client.post("/api/genres/seed-subgenres")
-    await _make_articles([('["ai", "agent"]', 30), ('["ai", "security"]', 30), ('["ai"]', 10)])
+    await _make_articles(
+        [
+            ('["ai", "agent"]', 30),
+            ('["ai", "security"]', 30),
+            ('["ai"]', 10),
+            # ai_misc とは無関係な "other" バケットにも保留中の提案を作り、
+            # 「同じジャンルだけでなく全ジャンルの保留が消える」ことを検証する
+            ('["zzzalpha"]', 30),
+            ('["zzzbeta"]', 25),
+        ]
+    )
 
     async with async_session() as session:
         await refresh_split_suggestions(session)
@@ -520,17 +541,22 @@ async def test_apply_closes_the_other_pending_proposals_for_the_same_genre(
 
     async with async_session() as session:
         rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
-        same_genre = [r for r in rows if r.genre_key == rows[0].genre_key]
-        if len(same_genre) < 2:
-            pytest.skip("この辞書では同ジャンルに複数案が立たなかった")
-        await apply_suggestion(session, same_genre[0].id)
+        # ai_misc というジャンル名で明示的に絞る（rows[0] を基準にすると、
+        # たまたま "other" 側の 1 件が先頭に来て False Negative になりうる）
+        same_genre = [r for r in rows if r.genre_key == "ai_misc"]
+        other_genre = [r for r in rows if r.genre_key != "ai_misc"]
+        # この辞書・件数の組み合わせでは ai_misc に demote_generic と
+        # promote_free_tags の両方が成立し、必ず 2 件以上になる。立たなければ
+        # シナリオの前提が壊れているので、無効化せずここで失敗させる
+        assert len(same_genre) >= 2
+        assert len(other_genre) >= 1  # 無関係な "other" 側の保留も存在する
+        target_id = same_genre[0].id
+        await apply_suggestion(session, target_id)
         await session.commit()
 
     async with async_session() as session:
         after = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
-        for row in after:
-            if row.genre_key == same_genre[0].genre_key:
-                assert row.dismissed_at is not None
+        assert after == []  # ジャンルを問わず保留中の提案が全部消えている
 
 
 @pytest.mark.asyncio
@@ -548,7 +574,7 @@ async def test_dismiss_suppresses_until_the_count_grows(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -602,7 +628,7 @@ async def test_apply_to_a_childless_top_level_genre_makes_children_of_it(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -657,7 +683,7 @@ async def test_apply_from_other_creates_a_genuine_top_level_genre(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -725,7 +751,7 @@ async def test_apply_resets_is_generic_when_reassigning_an_existing_rule(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -801,7 +827,7 @@ async def test_apply_raises_when_a_child_key_collides_with_an_unrelated_genre(
         refresh_split_suggestions,
     )
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -846,6 +872,177 @@ async def test_apply_raises_when_a_child_key_collides_with_an_unrelated_genre(
         # 提案自体もまだ保留中（閉じられていない）
         suggestion = await session.get(GenreSplitSuggestion, target_id)
         assert suggestion is not None and suggestion.dismissed_at is None
+
+
+@pytest.mark.asyncio
+async def test_apply_raises_when_a_demote_tag_has_moved_to_a_different_genre(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """demote_generic 提案の保存後に、その降格対象タグが別ジャンルへ動かされて
+    いたら、黙って別ジャンルのルールを降格しない（#5）。
+
+    子キーの衝突を検出する既存のガード（
+    test_apply_raises_when_a_child_key_collides_with_an_unrelated_genre）と対に
+    なる、demote_tags 版の検証。以前は children が空（demote_generic は常に
+    children=()）だと検証フェーズ全体がスキップされており、このケースは
+    一切検出されなかった。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreRule, GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups, **_kwargs):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    await client.post("/api/genres/seed-subgenres")
+    # ai_misc を demote_generic だけが成立する形（担当タグは ai のみ）で超過させる
+    await _make_articles([('["ai", "security"]', 30), ('["ai"]', 30)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if r.strategy == "demote_generic")
+        proposal = payload_to_proposal(target.payload)
+        assert proposal.demote_tags == ("ai",)
+        target_id = target.id
+
+    # 提案の保存後、利用者が管理画面で ai タグを別ジャンル(widgets)へ動かしたとする
+    async with async_session() as session:
+        widgets = Genre(key="widgets", label_ja="ウィジェット", priority=90)
+        session.add(widgets)
+        await session.flush()
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == "ai"))
+        ).scalar_one()
+        rule.genre_id = widgets.id
+        await session.commit()
+
+    async with async_session() as session:
+        with pytest.raises(ValueError):
+            await apply_suggestion(session, target_id)
+
+    async with async_session() as session:
+        # 何も変更されていない: ai のルールは widgets のまま、is_generic も変わっていない
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == "ai"))
+        ).scalar_one()
+        widgets_genre = (
+            await session.execute(select(Genre).where(Genre.key == "widgets"))
+        ).scalar_one()
+        assert rule.genre_id == widgets_genre.id
+        assert rule.is_generic is False
+        # 提案自体もまだ保留中（削除も閉じられてもいない）
+        suggestion = await session.get(GenreSplitSuggestion, target_id)
+        assert suggestion is not None and suggestion.dismissed_at is None
+
+
+@pytest.mark.asyncio
+async def test_apply_raises_when_the_demote_target_genre_was_deleted(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """demote_generic 提案（children が空）でも、対象ジャンルが提案の保存後に
+    削除されていたら検出して失敗する（#5）。
+
+    検証フェーズ（対象ジャンルの存在確認）は children の有無に関係なく
+    必ず走らなければならない——以前は `if proposal.children and not is_other`
+    のガードのせいで、demote_generic（children=()）はこのチェックを常に
+    スキップしていた。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreSplitSuggestion
+    from app.services.genre_split_store import apply_suggestion, refresh_split_suggestions
+
+    async def fake_name(tag_groups, **_kwargs):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    await client.post("/api/genres/seed-subgenres")
+    await _make_articles([('["ai", "security"]', 30), ('["ai"]', 30)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if r.strategy == "demote_generic")
+        assert target.genre_key == "ai_misc"
+        target_id = target.id
+
+    # 提案の保存後、利用者が ai_misc ジャンル自体を削除したとする
+    async with async_session() as session:
+        ai_misc = (
+            await session.execute(select(Genre).where(Genre.key == "ai_misc"))
+        ).scalar_one()
+        await session.delete(ai_misc)
+        await session.commit()
+
+    async with async_session() as session:
+        with pytest.raises(LookupError):
+            await apply_suggestion(session, target_id)
+
+
+@pytest.mark.asyncio
+async def test_refresh_expires_a_pending_proposal_once_the_genre_drops_under_the_limit(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """保留中の提案は、その後ジャンルの未読が上限を下回ったら失効(削除)する（#4b）。
+
+    再計算して差し替えることはしない——単に消す。そうしないと、利用者が既に
+    読み下げたジャンルに対して UI が 47 秒かかる適用を提案し続けてしまう
+    （以前は refresh_split_suggestions が「未読記事が 0 件」以外のケースで
+    保留中の提案を一度も見直さなかった）。
+    """
+    from sqlalchemy import func, select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Article, GenreSplitSuggestion
+    from app.services.genre_split_store import refresh_split_suggestions
+
+    async def fake_name(tag_groups, **_kwargs):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    await client.post("/api/genres/seed-subgenres")
+    await _make_articles([('["ai", "security"]', 30), ('["ai"]', 30)])
+
+    async with async_session() as session:
+        first = await refresh_split_suggestions(session)
+        await session.commit()
+    assert first > 0
+
+    # ai_misc の記事の大半を既読にして、未読件数を上限未満まで減らす
+    async with async_session() as session:
+        articles = (await session.execute(select(Article))).scalars().all()
+        for article in articles[:40]:
+            article.is_read = True
+        await session.commit()
+
+    async with async_session() as session:
+        second = await refresh_split_suggestions(session)
+        await session.commit()
+        total = await session.scalar(select(func.count()).select_from(GenreSplitSuggestion))
+
+    assert second == 0
+    assert total == 0  # 保留中だった提案は失効して消えている
 
 
 @pytest.mark.asyncio

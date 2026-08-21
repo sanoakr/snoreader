@@ -30,6 +30,7 @@ def proposal_to_payload(proposal: "SplitProposal") -> str:
             "strategy": proposal.strategy,
             "before": proposal.before,
             "projected_max": proposal.projected_max,
+            "projected_target": proposal.projected_target,
             "children": [
                 {
                     "key": c.key,
@@ -55,6 +56,7 @@ def payload_to_proposal(payload: str) -> "SplitProposal":
         strategy=data["strategy"],
         before=data["before"],
         projected_max=data["projected_max"],
+        projected_target=data["projected_target"],
         children=tuple(
             ProposedChild(
                 key=c["key"],
@@ -88,29 +90,56 @@ async def _unread_articles(session: AsyncSession) -> list[tuple[int, list[str]]]
     return [(aid, parse_tags(raw)) for aid, raw in rows]
 
 
-async def refresh_split_suggestions(session: AsyncSession) -> int:
+async def refresh_split_suggestions(
+    session: AsyncSession, *, priority: int | None = None
+) -> int:
     """上限超のジャンルを検知し、新しい提案を保存して件数を返す。commit しない。
 
     再提案の規則:
     - 同じ (genre_key, strategy) の保留中（dismissed_at が None）の行があれば作らない
     - 無視済み（dismissed_at がある）の行しかない場合は、現在の未読件数が
       無視した時点の件数（dismissed_at_count）より増えたときだけ作る
+
+    先に、上限を下回った（読まれた・保存された・非表示にされた等で減った）ジャンルの
+    保留中の提案を失効させる（#4b）。そうしないと、利用者が既に読み下げたジャンルに
+    対して UI が 47 秒かかる適用を提案し続けてしまう。失効した提案を再計算して
+    差し替えることはしない——これは意図的に見送っている。単に消して、次にまた
+    超過したら新しい提案が作られるのに任せる。
+
+    priority はラベル命名の LLM 呼び出しの task_queue 優先度（省略時は
+    PRIORITY_BACKGROUND）。スケジューラ発の呼び出しはユーザー操作を待たせないよう
+    背景優先度のままにし、手動の再計算エンドポイントだけが前景優先度を渡す（#10）。
     """
+    from collections import Counter
     from dataclasses import replace
 
     from app.ai.genre_namer import name_genres
-    from app.services.genre_classifier import load_rules
+    from app.services.genre_classifier import classify, load_rules
     from app.services.genre_split_planner import ProposedChild, SplitProposal, plan_splits
 
     articles = await _unread_articles(session)
+    rules = await load_rules(session)
+    counts = Counter(classify(tags, rules) for _aid, tags in articles)
+
+    existing = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+    stale_ids = {
+        row.id
+        for row in existing
+        if row.dismissed_at is None
+        and counts.get(row.genre_key, 0) <= settings.genre_unread_limit
+    }
+    for row in existing:
+        if row.id in stale_ids:
+            await session.delete(row)
+    existing = [row for row in existing if row.id not in stale_ids]
+
     if not articles:
         return 0
-    rules = await load_rules(session)
+
     proposals = plan_splits(articles, rules, limit=settings.genre_unread_limit)
     if not proposals:
         return 0
 
-    existing = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
     pending = {(r.genre_key, r.strategy) for r in existing if r.dismissed_at is None}
     # 無視済みは、そのときの件数より増えたら再提案する
     dismissed_floor: dict[tuple[str, str], int] = {}
@@ -135,7 +164,7 @@ async def refresh_split_suggestions(session: AsyncSession) -> int:
     # ラベル命名は LLM を 1 回だけ。子を持たない案（demote_generic）は tags が
     # 空なのでグループが 0 件になり、name_genres は空リストを渡されても長さ 0 を返す
     groups = [c.tags for p in fresh for c in p.children]
-    labels = await name_genres(groups)
+    labels = await name_genres(groups, priority=priority)
     named = iter(labels)
 
     # dataclasses.replace で凍結データクラス（ProposedChild / SplitProposal）の
@@ -166,7 +195,11 @@ def _utcnow() -> str:
 
 
 async def _close_pending_for_genre(session: AsyncSession, genre_key: str, count: int) -> int:
-    """そのジャンルの保留中（dismissed_at が None）の提案を全部閉じる。閉じた行数を返す。"""
+    """そのジャンルの保留中（dismissed_at が None）の提案を全部閉じる。閉じた行数を返す。
+
+    dismiss 専用。「ユーザーが断った」という意味のフロアを立てる操作で、
+    apply（辞書が変わって古くなっただけ）とは別の事象なので混同しない（#1）。
+    """
     rows = (
         await session.execute(
             select(GenreSplitSuggestion).where(
@@ -182,6 +215,25 @@ async def _close_pending_for_genre(session: AsyncSession, genre_key: str, count:
     return len(rows)
 
 
+async def _delete_all_pending(session: AsyncSession) -> int:
+    """保留中（dismissed_at が None）の提案を、ジャンルを問わず全部削除する。
+
+    apply 専用（#1, #4a）。辞書が変わった時点で、対象ジャンルだけでなく
+    全ジャンルの projected が無効になる（demote_generic は他ジャンルへ再配分
+    するので、対象以外の保留提案の projected も同時に古くなる）。ユーザーが
+    「断った」わけではないので、dismiss のようにフロアを立てて残す意味がない
+    ——単に消す。消した行数を返す。
+    """
+    rows = (
+        await session.execute(
+            select(GenreSplitSuggestion).where(GenreSplitSuggestion.dismissed_at.is_(None))
+        )
+    ).scalars().all()
+    for row in rows:
+        await session.delete(row)
+    return len(rows)
+
+
 async def apply_suggestion(
     session: AsyncSession,
     suggestion_id: int,
@@ -193,14 +245,16 @@ async def apply_suggestion(
     - demote_tags は GenreRule.is_generic = True にする
     - children は Genre を作り（無ければ）、タグの GenreRule を付け替える
     - 最後に reclassify_all を 1 回だけ呼ぶ（本番で ~47 秒かかるので、この経路だけに限る）
-    - 辞書が変わった後は projected_max が無効になるので、同じ genre_key の
-      保留中の他の案（この提案自身も含む）を全部閉じる
+    - 辞書が変わった後は全ジャンルの projected_max が無効になるので、ジャンルを
+      問わず保留中の提案を全部削除する（#1, #4a。dismiss のようにフロアを
+      立てるのではない——「断られた」わけではないので単に消す）
 
     提案の保存後、DB がスナップショットと食い違っていることがある
-    （対象ジャンルが消えた、または子キーと同名の別ジャンルが独立に作られた）。
-    そういう食い違いは検証フェーズで洗い出し、何も変更する前に例外を投げる。
-    「見つからない」（LookupError）と「見つかったが古いスナップショットと
-    矛盾する」（ValueError）は呼び出し側が別々に扱えるよう区別する。
+    （対象ジャンルが消えた、demote_tags が別ジャンルへ動いた、または子キーと
+    同名の別ジャンルが独立に作られた）。そういう食い違いは検証フェーズで
+    洗い出し、何も変更する前に例外を投げる。「見つからない」（LookupError）と
+    「見つかったが古いスナップショットと矛盾する」（ValueError）は呼び出し側が
+    別々に扱えるよう区別する。
     """
     from app.services.genre_classifier import OTHER_GENRE, reclassify_all
     from app.services.genre_split_planner import DEFAULT_NEW_GENRE_PRIORITY
@@ -216,16 +270,31 @@ async def apply_suggestion(
     is_other = proposal.genre_key == OTHER_GENRE
     parent_id: int | None = None
     priority = DEFAULT_NEW_GENRE_PRIORITY
-    if proposal.children and not is_other:
+
+    target: Genre | None = None
+    if not is_other:
+        # children の有無に関係なく必ず対象ジャンルの存在を確認する（#5）。
+        # 以前は children が空（demote_generic）だとこのブロック自体を
+        # スキップしていたため、対象ジャンルが削除されていても検出できなかった
         target = (
             await session.execute(select(Genre).where(Genre.key == proposal.genre_key))
         ).scalar_one_or_none()
         if target is None:
             raise LookupError("Genre no longer exists")
+
+    if proposal.children and not is_other:
         # target が子なら新しい子は兄弟（同じ親）に、target が子を持たない
         # トップレベルなら target 自身の子にする。階層は 2 段のまま
         parent_id = target.parent_id if target.parent_id is not None else target.id
         parent = await session.get(Genre, parent_id)
+        if parent is not None and parent.parent_id is not None:
+            # ここに到達するのは DB の不変条件（階層は 2 段まで）が既に破れて
+            # いるときだけのはずだが、将来の回帰が静かに 3 段目を作るより、
+            # ここで大きく落ちてほしい（#6）
+            raise AssertionError(
+                f"Refusing to nest under '{parent.key}', which is itself a child; "
+                "genres can only nest one level deep"
+            )
         priority = parent.priority if parent is not None else target.priority
 
     for child in proposal.children:
@@ -241,6 +310,20 @@ async def apply_suggestion(
                 f"Genre '{child.key}' already exists with a different parent; "
                 "the proposal is stale — refresh split suggestions and retry"
             )
+
+    if proposal.demote_tags and target is not None:
+        # demote_generic のスナップショットが今も有効か検証する（#5）。保存後に
+        # 利用者がそのタグを別ジャンルへ動かしていたら、黙って別ジャンルの
+        # ルールを降格してしまう——child-key の衝突ガードと対になる検証
+        for tag in proposal.demote_tags:
+            rule = (
+                await session.execute(select(GenreRule).where(GenreRule.tag == tag))
+            ).scalar_one_or_none()
+            if rule is not None and rule.genre_id != target.id:
+                raise ValueError(
+                    f"Tag '{tag}' no longer belongs to '{proposal.genre_key}'; "
+                    "the proposal is stale — refresh split suggestions and retry"
+                )
 
     # --- ここから変更フェーズ ---
     created = 0
@@ -297,8 +380,10 @@ async def apply_suggestion(
 
     await session.flush()
     reclassified = await reclassify_all(session)
-    # この提案自身も「同じ genre_key の保留中の案」に含まれるので、ここで閉じられる
-    await _close_pending_for_genre(session, proposal.genre_key, proposal.before)
+    # 辞書が変わったので、対象ジャンルだけでなく全ジャンルの保留中の提案（この
+    # 提案自身も含む）が無効になる。dismiss と違い「断られた」わけではないので、
+    # フロアを立てず単に消す（#1, #4a）
+    await _delete_all_pending(session)
     return created, moved, reclassified
 
 
