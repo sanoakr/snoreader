@@ -26,6 +26,15 @@ _DEFAULT_NEW_GENRE_PRIORITY = 100
 # そのジャンルの未読の何割以上に出現するタグを「受け皿」とみなすか
 _DEMOTE_COVERAGE = 0.8
 
+# projected_max が同値のときの戦略の優先順位。仕様の表の順（C: demote_generic ->
+# A: split_own_tags -> B: promote_free_tags）を明示する。文字列のアルファベット順
+# （"promote_free_tags" < "split_own_tags"）に流されると A と B が入れ替わるので注意。
+_STRATEGY_RANK: dict[str, int] = {
+    "demote_generic": 0,
+    "split_own_tags": 1,
+    "promote_free_tags": 2,
+}
+
 
 @dataclass(frozen=True)
 class ProposedChild:
@@ -347,5 +356,5 @@ def plan_splits(
             found = planner(genre_key, articles, rules, limit=limit)
             if found:
                 proposals.append(found)
-    proposals.sort(key=lambda p: (p.projected_max, p.genre_key, p.strategy))
+    proposals.sort(key=lambda p: (p.projected_max, p.genre_key, _STRATEGY_RANK[p.strategy]))
     return proposals

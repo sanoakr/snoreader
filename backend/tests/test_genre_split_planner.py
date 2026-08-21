@@ -230,20 +230,65 @@ def test_a_sibling_key_sorting_after_the_receptacle_is_rejected() -> None:
 
     兄弟は親と同じ priority を持つので必ず同順位になり、_resolve の同値解決
     （キーの辞書順）で決まる。受け皿より後にソートされるキーの新兄弟は
-    記事を 1 件も取れない。シミュレーションがこれを projected 0 で検出する。
+    記事を 1 件も取れない。シミュレーションがこれを projected 0 として検出し、
+    estimated_unread == 0 の子を含む案は丸ごと棄却されるべき。
+
+    misc_mid が受け皿。law は辞書順で misc_mid の前に来るので正しく勝ち、
+    war は後に来るので必ず負ける（law だけ抜けば misc_mid は上限未満になる）。
+    news_zzz は無関係な対照ジャンル: sports だけが未ルール共起タグで、誰も
+    負けないので常に成立する——plan_splits がここから最低 1 件は案を返すこと
+    を保証し、この下のループが空で回って何も検証しない事態を防ぐ
+    （元のテストは articles を変えても plan_splits が [] を返すままだったため、
+    ループ本体が一度も実行されず、estimated_unread == 0 棄却ガードを両方の
+    プランナから削除しても全テストが通ってしまっていた）。
     """
     from app.services.genre_split_planner import plan_splits
 
-    # 受け皿は ai_aaa（辞書順で最初）。新兄弟 ai_zzz は必ず負ける
-    rules = _rules({"ai": "ai_aaa"}, priority={"ai": 1, "ai_aaa": 1}, parent={"ai_aaa": "ai"})
+    rules = _rules(
+        {"topic": "misc_mid", "headline": "news_zzz"},
+        priority={"misc": 5, "misc_mid": 5, "news": 2, "news_zzz": 2},
+        parent={"misc_mid": "misc", "news_zzz": "news"},
+    )
     articles = (
-        [(i, ["ai", "zzz"]) for i in range(30)]
-        + [(100 + i, ["ai"]) for i in range(30)]
+        [(i, ["topic", "law"]) for i in range(20)]          # 受け皿より前: 正しく勝つ
+        + [(100 + i, ["topic", "war"]) for i in range(20)]  # 受け皿より後: 必ず負ける
+        + [(200 + i, ["topic"]) for i in range(15)]         # topic だけ（受け皿に残る）
+        + [(300 + i, ["headline", "sports"]) for i in range(20)]  # 対照: 常に勝つ
+        + [(400 + i, ["headline"]) for i in range(40)]
     )
 
-    for proposal in plan_splits(articles, rules, limit=50):
+    proposals = plan_splits(articles, rules, limit=50)
+    assert proposals  # ループが空で回って何も検証しない、を防ぐ
+    for proposal in proposals:
         # 提案されたどの子も、必ず 1 件以上引き取れている
         assert all(c.estimated_unread > 0 for c in proposal.children)
+
+
+def test_strategy_ties_break_in_spec_table_order() -> None:
+    """projected_max が同値なら、仕様の表の順（C: demote_generic -> A: split_own_tags
+    -> B: promote_free_tags）で並ぶ。文字列のアルファベット順に流されると
+    ("promote_free_tags" < "split_own_tags") A と B の順が入れ替わってしまう。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    # dev_prog は python 40 件（すべて docker も併せ持つ）+ rust 20 件 = 60 件で超過。
+    # split_own_tags は rust を追い出して projected_max=40。
+    # promote_free_tags は docker を追い出して projected_max=40。ちょうど同値になる。
+    rules = _rules(
+        {"python": "dev_prog", "rust": "dev_prog"},
+        priority={"dev": 3, "dev_prog": 3},
+        parent={"dev_prog": "dev"},
+    )
+    articles = (
+        [(i, ["python", "docker"]) for i in range(40)]
+        + [(100 + i, ["rust"]) for i in range(20)]
+    )
+
+    proposals = [p for p in plan_splits(articles, rules, limit=50) if p.genre_key == "dev_prog"]
+    assert proposals  # 空リストでは同値タイの主張自体が検証されない
+    # 実際に同値であることを確認しておく（同値でなければ順序の主張自体が無意味）
+    assert len({p.projected_max for p in proposals}) == 1
+    assert [p.strategy for p in proposals] == ["split_own_tags", "promote_free_tags"]
 
 
 def test_promote_free_tags_splits_a_childless_top_level_genre() -> None:
