@@ -355,7 +355,7 @@ async def test_split_suggestion_endpoints_list_apply_and_dismiss(
     from app.database import async_session
     from app.models import Article, Feed
 
-    async def fake_name(tag_groups):
+    async def fake_name(tag_groups, **_kwargs):
         return [g[0] if g else "" for g in tag_groups]
 
     monkeypatch.setattr(genre_namer, "name_genres", fake_name)
@@ -455,6 +455,7 @@ async def test_apply_stale_suggestion_returns_409(client: AsyncClient) -> None:
             "strategy": "split_own_tags",
             "before": 60,
             "projected_max": 10,
+            "projected_target": 10,
             "children": [
                 {
                     "key": "conflict_child",

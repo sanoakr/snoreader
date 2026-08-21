@@ -214,7 +214,12 @@ class SplitSuggestionOut(BaseModel):
     strategy: str
     # 検知時の未読件数（モデルの列名は before_count。SQL 予約語を避けている）
     before: int
+    # 影響を受ける（genre_key 自身を含む）バケット群の、適用後の最大件数。
+    # genre_key 自身の適用後件数ではない（それは projected_target）
     projected_max: int
+    # genre_key 自身の適用後の実測件数。demote_generic では大きく縮む一方、
+    # 譲り先の既存ジャンルが projected_max 側で上限をわずかに超えることがある
+    projected_target: int
     children: list[ProposedChildOut] = []
     demote_tags: list[str] = []
     created_at: str

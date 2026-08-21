@@ -170,6 +170,7 @@ async def list_split_suggestions(session: AsyncSession = Depends(get_session)):
                 strategy=row.strategy,
                 before=row.before_count,
                 projected_max=row.projected_max,
+                projected_target=proposal.projected_target,
                 children=[
                     ProposedChildOut(
                         key=c.key,
@@ -189,10 +190,16 @@ async def list_split_suggestions(session: AsyncSession = Depends(get_session)):
 
 @router.post("/genres/split-suggestions/refresh", response_model=dict)
 async def refresh_split_suggestions_endpoint(session: AsyncSession = Depends(get_session)):
-    """手動で再計算する。通常はフィード取得サイクルの末尾で走る。"""
+    """手動で再計算する。通常はフィード取得サイクルの末尾で走る。
+
+    ユーザーがボタンを押した操作なので、ラベル命名の LLM 呼び出しは前景優先度で
+    行う（スケジューラ発の呼び出しはユーザー操作を待たせないよう背景優先度のまま。
+    #10）。
+    """
+    from app.ai.task_queue import PRIORITY_FOREGROUND
     from app.services.genre_split_store import refresh_split_suggestions
 
-    created = await refresh_split_suggestions(session)
+    created = await refresh_split_suggestions(session, priority=PRIORITY_FOREGROUND)
     await session.commit()
     return {"created": created}
 

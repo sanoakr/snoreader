@@ -20,13 +20,22 @@ _SYSTEM = (
 _TOKENS_PER_GROUP = 24
 
 
-async def name_genres(tag_groups: list[tuple[str, ...]]) -> list[str]:
-    """各タグ集合に日本語ラベルを付ける。長さは必ず入力と同じ。"""
-    from app.ai.task_queue import PRIORITY_FOREGROUND
+async def name_genres(
+    tag_groups: list[tuple[str, ...]], *, priority: int | None = None
+) -> list[str]:
+    """各タグ集合に日本語ラベルを付ける。長さは必ず入力と同じ。
+
+    priority は task_queue の優先度（省略時は PRIORITY_BACKGROUND）。この呼び出しは
+    1 ワーカーの "reserved" レーンを使うので、スケジューラ発の呼び出しを前景優先度
+    にすると、ユーザーのチャットや手動要約が最大 llm_timeout 秒待たされる。手動の
+    再計算エンドポイントだけがユーザー操作として PRIORITY_FOREGROUND を渡す（#10）。
+    """
+    from app.ai.task_queue import PRIORITY_BACKGROUND
 
     if not tag_groups:
         return []
 
+    effective_priority = PRIORITY_BACKGROUND if priority is None else priority
     fallback = [group[0] if group else "" for group in tag_groups]
     lines = ["，".join(group) for group in tag_groups]
     result = await chat_completion(
@@ -36,7 +45,7 @@ async def name_genres(tag_groups: list[tuple[str, ...]]) -> list[str]:
         ],
         max_tokens=len(tag_groups) * _TOKENS_PER_GROUP + 256,
         temperature=0.1,
-        priority=PRIORITY_FOREGROUND,
+        priority=effective_priority,
         lane="reserved",
     )
     if not result:
