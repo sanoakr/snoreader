@@ -217,7 +217,11 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
               />
             </SectionHeading>
             {showTagManager && (
-              <TagManagerModal tagLang={tagLang} onClose={() => setShowTagManager(false)} />
+              <TagManagerModal
+                tagLang={tagLang}
+                onToggleTagLang={onToggleTagLang}
+                onClose={() => setShowTagManager(false)}
+              />
             )}
           </>
         )}

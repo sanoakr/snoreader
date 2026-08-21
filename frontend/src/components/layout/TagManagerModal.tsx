@@ -3,15 +3,16 @@ import { ModalShell } from '../common/ModalShell';
 import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 
 interface Props {
-  // 表示名の言語はサイドバーの EN|JA トグルと共有する（表示設定なのでモーダル側には置かない）
+  // 表示名の言語はアプリ全体の設定。サイドバー見出しのトグルと同じ状態を切り替える
   tagLang: 'en' | 'ja';
+  onToggleTagLang: () => void;
   onClose: () => void;
 }
 
 // タグの改名・削除と、Saved 記事への一括タグ付けをまとめたモーダル。
 // ジャンル管理と同じ ModalShell に載せることで、見出しの ⚙ から開くものは
 // どれも同じ形で開く（サイドバー内にインラインで開くと一覧が押し下がる）。
-export function TagManagerModal({ tagLang, onClose }: Props) {
+export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
   const { data: tags } = useTags();
   const renameTag = useRenameTag();
   const bulkDeleteTags = useBulkDeleteTags();
@@ -40,32 +41,58 @@ export function TagManagerModal({ tagLang, onClose }: Props) {
 
   return (
     <ModalShell title="タグ管理" onClose={onClose} maxWidthClass="max-w-2xl">
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 pb-2 dark:border-gray-700">
-        <button
-          onClick={() => fillTranslations.mutate()}
+      <div className="flex items-center justify-between gap-2 pb-2">
+        <div className="flex items-center gap-2">
+          {/* 一覧の表示名を切り替える。サイドバー見出しのトグルと同じ状態 */}
+          <button
+            onClick={onToggleTagLang}
+            className="flex items-center gap-0.5 rounded border border-gray-300 px-1.5 py-0.5 text-xs leading-none hover:border-gray-400 dark:border-gray-600"
+            title="表示名の言語を切り替える"
+          >
+            <span className={tagLang === 'en' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>EN</span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className={tagLang === 'ja' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>JA</span>
+          </button>
+          <span className="text-xs text-gray-400">{tags?.length ?? 0} タグ</span>
+        </div>
+      </div>
+
+      {/* 一括操作は「何をするのか」を 1 行の説明で見せる。ラベルだけでは
+          Auto tag / AI tag の違い（LLM を使うか、既存タグだけを使うか）が伝わらなかった */}
+      <div className="grid gap-2 border-y border-gray-200 py-2 dark:border-gray-700 sm:grid-cols-3">
+        <BulkAction
+          label="日本語名を補完"
+          description="英語名だけのタグに、AI が日本語名を付ける"
+          status={fillTranslations.isPending ? '実行中...' : fillTranslations.isSuccess ? '完了' : null}
           disabled={fillTranslations.isPending}
-          className="text-xs text-blue-500 hover:text-blue-700 disabled:opacity-50"
-          title="Translate English tags to Japanese"
-        >
-          {fillTranslations.isPending ? 'Translating...' : fillTranslations.isSuccess ? 'Done' : 'JA補完'}
-        </button>
-        <button
-          onClick={() => autoTagSaved.mutate()}
+          onClick={() => fillTranslations.mutate()}
+        />
+        <BulkAction
+          label="キーワードで付与"
+          description="既存タグ名が本文にある Saved 記事に、最大 3 件付ける（AI 不使用・即時）"
+          status={
+            autoTagSaved.isPending
+              ? '照合中...'
+              : autoTagSaved.isSuccess
+                ? `${autoTagSaved.data.processed} 記事に ${autoTagSaved.data.attached} 件付与`
+                : null
+          }
           disabled={autoTagSaved.isPending}
-          className="text-xs text-green-600 hover:text-green-700 disabled:opacity-50"
-          title="Auto-tag untagged Saved articles via existing-tag keyword match"
-        >
-          {autoTagSaved.isPending ? 'Matching...' : autoTagSaved.isSuccess ? `+${autoTagSaved.data.attached} on ${autoTagSaved.data.processed}` : 'Auto tag'}
-        </button>
-        <button
-          onClick={() => aiTagSaved.mutate()}
+          onClick={() => autoTagSaved.mutate()}
+        />
+        <BulkAction
+          label="AI でタグを生成"
+          description="タグが無い Saved 記事に、AI が新しいタグを付ける（1 回 10 記事）"
+          status={
+            aiTagSaved.isPending
+              ? '投入中...'
+              : aiTagSaved.isSuccess
+                ? `${aiTagSaved.data.queued} 記事を投入（残り ${aiTagSaved.data.remaining}）`
+                : null
+          }
           disabled={aiTagSaved.isPending}
-          className="text-xs text-purple-500 hover:text-purple-700 disabled:opacity-50"
-          title="AI tag Saved articles (10 at a time)"
-        >
-          {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
-        </button>
-        {!!tags && <span className="ml-auto text-xs text-gray-400">{tags.length} tags</span>}
+          onClick={() => aiTagSaved.mutate()}
+        />
       </div>
 
       {/* 1 行が短いので、広くなった幅は列数に使う */}
@@ -114,5 +141,29 @@ export function TagManagerModal({ tagLang, onClose }: Props) {
         ))}
       </div>
     </ModalShell>
+  );
+}
+
+/** 一括操作 1 つ分。ラベルの下に処理内容を 1 行で書き、実行後はそこに結果を出す */
+function BulkAction({
+  label, description, status, disabled, onClick,
+}: {
+  label: string;
+  description: string;
+  status: string | null;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded border border-gray-300 px-2 py-1.5 text-left hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
+    >
+      <span className="block text-xs font-medium text-gray-700 dark:text-gray-200">{label}</span>
+      <span className={`mt-0.5 block text-[11px] leading-snug ${status ? 'text-green-600' : 'text-gray-400'}`}>
+        {status ?? description}
+      </span>
+    </button>
   );
 }
