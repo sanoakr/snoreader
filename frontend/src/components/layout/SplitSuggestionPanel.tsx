@@ -70,8 +70,17 @@ export function SplitSuggestionPanel() {
           </div>
           <div className="mt-1 text-gray-700 dark:text-gray-300">
             {STRATEGY_LABEL[s.strategy] ?? s.strategy}
-            {' — '}
-            {s.before} → {s.projected_max}
+          </div>
+          {/* projected_target: このジャンル自身の適用後件数。projected_max:
+              影響を受ける他ジャンルも含めた、適用後の最大件数(悪化した先も含む)。
+              この 2 つを混同すると「大きな改善」が「小さな改善」に見えてしまうので
+              明確に分けて出す */}
+          <div className="mt-1 text-gray-700 dark:text-gray-300">
+            {s.genre_key} 自身の未読: {s.before} → {s.projected_target} 件
+          </div>
+          <div className="text-gray-500 dark:text-gray-400">
+            影響先を含めた適用後の最大: {s.projected_max} 件
+            {s.projected_max > s.limit && '(他ジャンルが新たに上限超になります)'}
           </div>
 
           {/* demote_generic は子を持たず、降格するタグの一覧だけを示す */}
@@ -105,7 +114,7 @@ export function SplitSuggestionPanel() {
               className="rounded bg-blue-600 px-2 py-0.5 text-white hover:bg-blue-700 disabled:opacity-50"
               disabled={apply.isPending}
               onClick={() => {
-                if (!confirm('この案を適用します。既存記事の再分類に十数秒かかります。')) return;
+                if (!confirm('この案を適用します。既存記事の再分類に約 47 秒かかります。')) return;
                 apply.mutate(
                   { id: s.id, labels: editedLabels(s) },
                   {
