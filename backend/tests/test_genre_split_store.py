@@ -275,3 +275,316 @@ async def test_refresh_reproposes_a_dismissed_genre_once_unread_count_grows(
         await session.commit()
 
     assert third > 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_dismissed_floor_uses_the_max_across_multiple_dismissed_rows(
+    client: AsyncClient,
+) -> None:
+    """同じ (genre_key, strategy) の無視済み行が複数あるとき、閾値は最大値を使う。
+
+    「最後の行が勝つ」実装だと、後から挿入した行の dismissed_at_count が
+    たまたま小さいときに再提案が early に起きてしまう。それを検出するため、
+    未読件数 (55) を 2 つの閾値の間 (40 < 55 < 100) に置く: 正しい max() 実装
+    なら 55 <= max(100, 40) = 100 で抑制されるが、「最後の行が勝つ」実装なら
+    最後に挿入した行の 40 を使ってしまい 55 > 40 で誤って再提案してしまう。
+    """
+    from sqlalchemy import func, select
+
+    from app.database import async_session
+    from app.models import GenreSplitSuggestion
+    from app.services.genre_split_store import refresh_split_suggestions
+
+    # どちらのルールにも当たらないタグを 2 種類使う。1 種類だけだと
+    # promote_free_tags が全件を 1 つの新ジャンルに詰め込むだけになり、
+    # 詰め込んだ先も上限を超えて棄却される（分割の意味がない）。2 種類に
+    # 分けることで初めて "other" が上限超・分割後は両方が上限内という
+    # 本物の promote_free_tags 案が成立し、before=55 になる
+    await _make_articles([('["zzzalpha"]', 30), ('["zzzbeta"]', 25)])
+
+    async with async_session() as session:
+        # 同じ (genre_key, strategy) について、count が異なる無視済み行を 2 つ直接挿入する。
+        # 閾値が低いほうの行を最後に挿入する（「最後の行が勝つ」実装だとそちらを
+        # 使ってしまい、この後の未読件数 55 で誤って再提案してしまう）
+        session.add(
+            GenreSplitSuggestion(
+                genre_key="other",
+                strategy="promote_free_tags",
+                payload='{"genre_key": "other", "strategy": "promote_free_tags", '
+                '"before": 55, "projected_max": 55, "children": [], "demote_tags": []}',
+                before_count=55,
+                projected_max=55,
+                dismissed_at="2026-08-20T00:00:00+00:00",
+                dismissed_at_count=100,
+            )
+        )
+        session.add(
+            GenreSplitSuggestion(
+                genre_key="other",
+                strategy="promote_free_tags",
+                payload='{"genre_key": "other", "strategy": "promote_free_tags", '
+                '"before": 55, "projected_max": 55, "children": [], "demote_tags": []}',
+                before_count=55,
+                projected_max=55,
+                dismissed_at="2026-08-21T00:00:00+00:00",
+                dismissed_at_count=40,
+            )
+        )
+        await session.commit()
+
+    # 現在の未読 (55) は高いほうの閾値 (100) を超えていないので、max(100, 40) = 100
+    # を使えば再提案は起きないはずである（55 は低いほうの閾値 40 は超えている）
+    async with async_session() as session:
+        created = await refresh_split_suggestions(session)
+        await session.commit()
+        total = await session.scalar(
+            select(func.count()).select_from(GenreSplitSuggestion)
+        )
+
+    assert created == 0
+    assert total == 2  # 新しい行が作られていない
+
+
+@pytest.mark.asyncio
+async def test_refresh_dismissed_floor_falls_back_to_before_count_when_count_is_null(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """dismissed_at_count が NULL の無視済み行は before_count を閾値にする。
+
+    未読件数がその値と同じままなら再提案せず、それを超えたら再提案する。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import GenreSplitSuggestion
+    from app.services.genre_split_store import refresh_split_suggestions
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    await client.post("/api/genres/seed-subgenres")
+    await _make_articles([('["ai", "security"]', 30), ('["ai"]', 30)])
+
+    async with async_session() as session:
+        first = await refresh_split_suggestions(session)
+        await session.commit()
+    assert first > 0
+
+    # dismissed_at_count を明示的に NULL にしたまま無視済みにする
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        for row in rows:
+            row.dismissed_at = "2026-08-21T00:00:00+00:00"
+            row.dismissed_at_count = None
+        await session.commit()
+
+    # before_count と同じ未読件数のままなら再提案されない（NULL は before_count に落ちる）
+    async with async_session() as session:
+        second = await refresh_split_suggestions(session)
+        await session.commit()
+    assert second == 0
+
+    # before_count を超えるまで未読を増やすと再提案される
+    await _make_articles([('["ai"]', 20)])
+    async with async_session() as session:
+        third = await refresh_split_suggestions(session)
+        await session.commit()
+    assert third > 0
+
+
+@pytest.mark.asyncio
+async def test_apply_creates_children_moves_rules_and_reclassifies(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """適用で子が作られ、ルールが移り、記事が再分類される。
+
+    seed-subgenres は使わない。"ai" のように自分の元タグを全部子へ譲った
+    親ジャンルは GenreRule を 1 行も持たなくなり、load_rules の
+    「ルールを持たない親も priority を引けるようにする」フォールバックが
+    実際には _FALLBACK_PRIORITY（Genre.priority の実値ではない）を返してしまう
+    既存の別バグに当たり、promote_free_tags の新兄弟が常に既存兄弟に
+    タイブレークで負けて 0 件案として棄却される（このタスクの対象外の
+    genre_classifier.load_rules / genre_split_planner 側の話なので、ここでは
+    そのバグを踏まない「子を持たないトップレベル (security) がそのまま
+    ルールを持つ」構成を使う）。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Article, Genre, GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    # security (子を持たないトップレベル) を上限超にする。python は dev 所属の
+    # 既存ルールタグ（demote_generic 成立用）、monitoring は未ルールタグ
+    # （promote_free_tags 成立用）
+    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if r.strategy in {"promote_free_tags", "demote_generic"})
+        proposal = payload_to_proposal(target.payload)
+        created, moved, reclassified = await apply_suggestion(session, target.id)
+        await session.commit()
+
+    async with async_session() as session:
+        # demote_generic なら子は増えない。promote_free_tags なら子が増える
+        if proposal.children:
+            assert created == len(proposal.children)
+            keys = {
+                g.key for g in (await session.execute(select(Genre))).scalars().all()
+            }
+            assert {c.key for c in proposal.children} <= keys
+        else:
+            assert created == 0
+            assert moved > 0
+        # 適用したら記事の genre が実際に動いている
+        assert reclassified > 0
+        assert (await session.execute(select(Article))).scalars().first() is not None
+        # 適用した行は閉じている
+        applied = await session.get(GenreSplitSuggestion, target.id)
+        assert applied is not None and applied.dismissed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_apply_overrides_child_labels(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """承認時に編集したラベルが使われる。"""
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    # test_apply_creates_children_moves_rules_and_reclassifies と同じ理由で
+    # seed-subgenres は使わず、子を持たないトップレベル (security) を使う
+    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if payload_to_proposal(r.payload).children)
+        child_key = payload_to_proposal(target.payload).children[0].key
+        await apply_suggestion(session, target.id, labels={child_key: "監視"})
+        await session.commit()
+
+    async with async_session() as session:
+        genre = (
+            await session.execute(select(Genre).where(Genre.key == child_key))
+        ).scalar_one()
+        assert genre.label_ja == "監視"
+
+
+@pytest.mark.asyncio
+async def test_apply_closes_the_other_pending_proposals_for_the_same_genre(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1 つ適用すると、同ジャンルの他の案も閉じる（projected_max が無効になるため）。"""
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import GenreSplitSuggestion
+    from app.services.genre_split_store import apply_suggestion, refresh_split_suggestions
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    # この構成では security に対して demote_generic と promote_free_tags の
+    # 両方が成立し、同じ genre_key の保留中の案が 2 件になる
+    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        same_genre = [r for r in rows if r.genre_key == rows[0].genre_key]
+        if len(same_genre) < 2:
+            pytest.skip("この辞書では同ジャンルに複数案が立たなかった")
+        await apply_suggestion(session, same_genre[0].id)
+        await session.commit()
+
+    async with async_session() as session:
+        after = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        for row in after:
+            if row.genre_key == same_genre[0].genre_key:
+                assert row.dismissed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_dismiss_suppresses_until_the_count_grows(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """無視した後は、未読がその時点より増えるまで再提案されない。"""
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        dismiss_suggestion,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    # security + 未ルールタグ monitoring で promote_free_tags のみが成立する
+    # 状況にする（python 抜きなら demote_generic は不成立のまま）
+    await _make_articles([('["security"]', 30), ('["security", "monitoring"]', 25)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        for row in rows:
+            await dismiss_suggestion(session, row.id)
+        await session.commit()
+
+    # 件数が変わらないので再提案されない
+    async with async_session() as session:
+        assert await refresh_split_suggestions(session) == 0
+        await session.commit()
+
+    # 未読が増えたら再提案される
+    await _make_articles([('["security", "monitoring"]', 20)])
+    async with async_session() as session:
+        assert await refresh_split_suggestions(session) > 0
+        await session.commit()

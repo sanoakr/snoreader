@@ -220,6 +220,17 @@ class SplitSuggestionOut(BaseModel):
     created_at: str
 
 
+class ApplySuggestionBody(BaseModel):
+    # {child_key: label_ja} の上書き。承認ダイアログで直した名前が入る
+    labels: dict[str, str] = {}
+
+
+class ApplySuggestionResult(BaseModel):
+    created: int
+    moved: int
+    reclassified: int
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Article, GenreSplitSuggestion
+from app.models import Article, Genre, GenreRule, GenreSplitSuggestion
 
 if TYPE_CHECKING:
     # 型注釈だけのための遅延インポート（実行時には読み込まない・app.services.* の
@@ -156,3 +156,126 @@ async def refresh_split_suggestions(session: AsyncSession) -> int:
         )
     await session.flush()
     return len(fresh)
+
+
+def _utcnow() -> str:
+    """タイムスタンプ形式の単一の源は app.models._utcnow。ここでは複製しない。"""
+    from app.models import _utcnow as models_utcnow
+
+    return models_utcnow()
+
+
+async def _close_pending_for_genre(session: AsyncSession, genre_key: str, count: int) -> int:
+    """そのジャンルの保留中（dismissed_at が None）の提案を全部閉じる。閉じた行数を返す。"""
+    rows = (
+        await session.execute(
+            select(GenreSplitSuggestion).where(
+                GenreSplitSuggestion.genre_key == genre_key,
+                GenreSplitSuggestion.dismissed_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    now = _utcnow()
+    for row in rows:
+        row.dismissed_at = now
+        row.dismissed_at_count = count
+    return len(rows)
+
+
+async def apply_suggestion(
+    session: AsyncSession,
+    suggestion_id: int,
+    *,
+    labels: dict[str, str] | None = None,
+) -> tuple[int, int, int]:
+    """分割提案を適用する。(created, moved, reclassified) を返す。commit は呼び出し側。
+
+    - demote_tags は GenreRule.is_generic = True にする
+    - children は Genre を作り（無ければ）、タグの GenreRule を付け替える
+    - 最後に reclassify_all を 1 回だけ呼ぶ（本番で ~47 秒かかるので、この経路だけに限る）
+    - 辞書が変わった後は projected_max が無効になるので、同じ genre_key の
+      保留中の他の案（この提案自身も含む）を全部閉じる
+    """
+    from app.services.genre_classifier import OTHER_GENRE, reclassify_all
+
+    row = await session.get(GenreSplitSuggestion, suggestion_id)
+    if row is None:
+        raise LookupError("Suggestion not found")
+    proposal = payload_to_proposal(row.payload)
+    overrides = labels or {}
+
+    created = 0
+    moved = 0
+
+    # 受け皿タグの汎用降格（demote_generic 戦略）
+    for tag in proposal.demote_tags:
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == tag))
+        ).scalar_one_or_none()
+        if rule is not None and not rule.is_generic:
+            rule.is_generic = True
+            moved += 1
+
+    # 新しい子（other 由来なら新トップレベル）を作り、タグを付け替える
+    if proposal.children:
+        is_other = proposal.genre_key == OTHER_GENRE
+        parent_id: int | None = None
+        priority = 100
+        if not is_other:
+            target = (
+                await session.execute(select(Genre).where(Genre.key == proposal.genre_key))
+            ).scalar_one_or_none()
+            if target is None:
+                raise LookupError("Genre no longer exists")
+            # target が子なら新しい子は兄弟（同じ親）に、target が子を持たない
+            # トップレベルなら target 自身の子にする。階層は 2 段のまま
+            parent_id = target.parent_id if target.parent_id is not None else target.id
+            parent = await session.get(Genre, parent_id)
+            priority = parent.priority if parent is not None else target.priority
+
+        for child in proposal.children:
+            genre = (
+                await session.execute(select(Genre).where(Genre.key == child.key))
+            ).scalar_one_or_none()
+            label = overrides.get(child.key, child.label_ja)
+            if genre is None:
+                genre = Genre(
+                    key=child.key,
+                    label_ja=label,
+                    priority=priority,
+                    parent_id=parent_id,
+                )
+                session.add(genre)
+                await session.flush()
+                created += 1
+            else:
+                genre.label_ja = label
+
+            for tag in child.tags:
+                rule = (
+                    await session.execute(select(GenreRule).where(GenreRule.tag == tag))
+                ).scalar_one_or_none()
+                if rule is None:
+                    # 既存 POST /genre-rules と同じ「衝突ではなく付け替え」の作法
+                    session.add(GenreRule(tag=tag, genre_id=genre.id, is_generic=False))
+                    moved += 1
+                elif rule.genre_id != genre.id:
+                    rule.genre_id = genre.id
+                    moved += 1
+
+    await session.flush()
+    reclassified = await reclassify_all(session)
+    # この提案自身も「同じ genre_key の保留中の案」に含まれるので、ここで閉じられる
+    await _close_pending_for_genre(session, proposal.genre_key, proposal.before)
+    return created, moved, reclassified
+
+
+async def dismiss_suggestion(session: AsyncSession, suggestion_id: int) -> int:
+    """提案を無視する。同じ genre_key の保留中の他の案も全部閉じる。
+
+    閉じた行数を返す。commit は呼び出し側。
+    """
+    row = await session.get(GenreSplitSuggestion, suggestion_id)
+    if row is None:
+        raise LookupError("Suggestion not found")
+    return await _close_pending_for_genre(session, row.genre_key, row.before_count)
