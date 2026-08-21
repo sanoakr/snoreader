@@ -243,6 +243,79 @@ def _plan_demote_generic(
     )
 
 
+def _plan_promote_free_tags(
+    genre_key: str,
+    articles: list[tuple[int, list[str]]],
+    rules: GenreRules,
+    *,
+    limit: int,
+) -> SplitProposal | None:
+    """そのジャンルの記事に多く共起する未ルールタグを、新しいジャンルの担当にする。
+
+    other は genres に行を持たない予約キーなので、新しい兄弟ではなく
+    新しいトップレベルジャンルを提案する（階層は 2 段のまま）。
+    """
+    current = _current_counts(articles, rules)
+    before = current[genre_key]
+    mine = [(aid, tags) for aid, tags in articles if classify(tags, rules) == genre_key]
+    if not mine:
+        return None
+
+    ruled = set(rules.tag_to_genre) | set(rules.generic_to_genre)
+    counts = Counter(t for _aid, tags in mine for t in tags if t not in ruled)
+    candidates = [(t, c) for t, c in counts.most_common() if c >= _MIN_CHILD_ARTICLES]
+    candidates = candidates[:_MAX_NEW_CHILDREN]
+    if not candidates:
+        return None
+
+    is_other = genre_key == OTHER_GENRE
+    parent_key = genre_key if is_other else rules.parent.get(genre_key, genre_key)
+    tag_moves: dict[str, str] = {}
+    keys: list[str] = []
+    seen_keys: set[str] = set()
+    for tag, _c in candidates:
+        key = tag if is_other else _sibling_key(parent_key, tag)
+        # 既存キーと衝突、この提案内での重複はいずれも作れない
+        if key == genre_key or key in rules.priority or key in seen_keys:
+            return None
+        seen_keys.add(key)
+        keys.append(key)
+        tag_moves[tag] = key
+
+    # other 由来の新トップレベルは既定の priority とし、既存ジャンルを侵さない。
+    # 兄弟のときは親と同じ priority（既存のサブジャンルと同じ作法）
+    new_priority = (
+        _DEFAULT_NEW_GENRE_PRIORITY
+        if is_other
+        else rules.priority.get(parent_key, _DEFAULT_NEW_GENRE_PRIORITY)
+    )
+    projected = _simulate(
+        articles,
+        rules,
+        tag_moves=tag_moves,
+        demote=set(),
+        new_priorities={k: new_priority for k in keys},
+    )
+    children = tuple(
+        ProposedChild(key=key, label_ja=tag, tags=(tag,), estimated_unread=projected[key])
+        for key, (tag, _c) in zip(keys, candidates)
+    )
+    if any(c.estimated_unread == 0 for c in children):
+        return None  # キーの辞書順で負けている案
+    if projected[genre_key] > limit:
+        return None
+    projected_max = _affected_max(current, projected, genre_key)
+    if projected_max > limit:
+        return None
+    return SplitProposal(
+        genre_key=genre_key,
+        strategy="promote_free_tags",
+        before=before,
+        projected_max=projected_max,
+        children=children,
+    )
+
+
 def plan_splits(
     articles: list[tuple[int, list[str]]],
     rules: GenreRules,
@@ -260,7 +333,7 @@ def plan_splits(
 
     proposals: list[SplitProposal] = []
     for genre_key in over:
-        for planner in (_plan_demote_generic, _plan_split_own_tags):
+        for planner in (_plan_demote_generic, _plan_split_own_tags, _plan_promote_free_tags):
             found = planner(genre_key, articles, rules, limit=limit)
             if found:
                 proposals.append(found)

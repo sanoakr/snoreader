@@ -156,3 +156,70 @@ def test_demote_generic_shrinks_a_receptacle_genre_without_adding_children() -> 
     assert proposal.demote_tags == ("ai",)
     assert proposal.children == ()          # ジャンルを増やさない手
     assert proposal.projected_max <= 50
+
+
+def test_promote_free_tags_creates_siblings_from_unruled_cooccurring_tags() -> None:
+    """未ルールの共起タグを新しい兄弟の担当タグにする。"""
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"ai": "ai_misc"},
+        priority={"ai": 1, "ai_misc": 1},
+        parent={"ai_misc": "ai"},
+    )
+    # agent 20 件 / benchmark 15 件 は未ルール。残り 25 件は ai だけ
+    articles = (
+        [(i, ["ai", "agent"]) for i in range(20)]
+        + [(100 + i, ["ai", "benchmark"]) for i in range(15)]
+        + [(200 + i, ["ai"]) for i in range(25)]
+    )
+
+    proposals = [
+        p for p in plan_splits(articles, rules, limit=50) if p.strategy == "promote_free_tags"
+    ]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.before == 60
+    assert proposal.projected_max <= 50
+    assert {t for c in proposal.children for t in c.tags} == {"agent", "benchmark"}
+    assert all(c.key.startswith("ai_") for c in proposal.children)
+
+
+def test_promote_free_tags_ignores_tags_below_the_minimum_article_count() -> None:
+    """2 件級の未ルールタグでジャンルを作らない（下限 _MIN_CHILD_ARTICLES）。
+
+    実データの ai_misc の未ルール共起タグは waymo 2 / google 2 しかなく、
+    下限がないと 2 件のジャンルが量産される。
+    """
+    from app.services.genre_split_planner import _MIN_CHILD_ARTICLES, plan_splits
+
+    assert _MIN_CHILD_ARTICLES > 2
+    rules = _rules({"ai": "ai_misc"}, priority={"ai": 1, "ai_misc": 1}, parent={"ai_misc": "ai"})
+    articles = (
+        [(i, ["ai", "waymo"]) for i in range(2)]
+        + [(100 + i, ["ai", "google"]) for i in range(2)]
+        + [(200 + i, ["ai"]) for i in range(60)]
+    )
+
+    assert [p for p in plan_splits(articles, rules, limit=50) if p.strategy == "promote_free_tags"] == []
+
+
+def test_promote_free_tags_on_other_creates_top_level_genres() -> None:
+    """other は genres に行がなくぶら下げ先がないので、新しいトップレベルを提案する。"""
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules({"python": "dev"}, priority={"dev": 3})
+    # どのルールにも当たらない記事 60 件。football 30 / drone 30
+    articles = (
+        [(i, ["football"]) for i in range(30)]
+        + [(100 + i, ["drone"]) for i in range(30)]
+    )
+
+    proposals = [
+        p for p in plan_splits(articles, rules, limit=50) if p.strategy == "promote_free_tags"
+    ]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.genre_key == "other"
+    assert {c.key for c in proposal.children} == {"football", "drone"}
+    assert proposal.projected_max <= 50
