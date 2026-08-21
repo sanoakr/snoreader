@@ -244,3 +244,32 @@ def test_a_sibling_key_sorting_after_the_receptacle_is_rejected() -> None:
     for proposal in plan_splits(articles, rules, limit=50):
         # 提案されたどの子も、必ず 1 件以上引き取れている
         assert all(c.estimated_unread > 0 for c in proposal.children)
+
+
+def test_promote_free_tags_splits_a_childless_top_level_genre() -> None:
+    """子を持たない親ジャンルが超過したときも、その下に子を新設できる。
+
+    politics（子なしトップレベル、priority 6, 担当タグ government）が本番の
+    政治ジャンル（現在 37 件）を縮めた再現。conflict は未ルールの共起タグで、
+    新兄弟 politics_conflict の priority は親と同じ 6 になるため必ず同順位になる。
+    parent を _simulate に登録しないと、キー文字列の接頭辞比較で親 "politics" が
+    常に子 "politics_conflict" に勝ってしまい、子が 0 件になって提案が棄却される。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules({"government": "politics"}, priority={"politics": 6})
+    articles = (
+        [(i, ["government", "conflict"]) for i in range(30)]
+        + [(100 + i, ["government"]) for i in range(30)]
+    )
+
+    proposals = [
+        p for p in plan_splits(articles, rules, limit=50) if p.strategy == "promote_free_tags"
+    ]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.genre_key == "politics"
+    assert proposal.before == 60
+    assert proposal.projected_max <= 50
+    assert {c.key for c in proposal.children} == {"politics_conflict"}
+    assert all(c.estimated_unread > 0 for c in proposal.children)

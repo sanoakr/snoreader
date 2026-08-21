@@ -289,12 +289,22 @@ def _plan_promote_free_tags(
         if is_other
         else rules.priority.get(parent_key, _DEFAULT_NEW_GENRE_PRIORITY)
     )
+    # 新しい子は親と同じ priority を持つので必ず同順位になり、_resolve は
+    # キーの辞書順で決める。新キーが親キーの接頭辞を含む文字列である以上、
+    # parent を登録しないと「親キーは子キーの接頭辞なので必ず短く、辞書順で
+    # 親が勝つ」という文字列比較の罠にかかり、子が常に 0 件になる。
+    # _prune_ancestors に親子関係を伝えて初めて「子孫が勝つ」規則が働く。
+    # ただし other 由来の新規ジャンルは新設のトップレベルそのものであり、
+    # 親という概念自体が無い（other は genres に行を持たない予約キー）ので
+    # ここでは parent を登録しない——登録すると存在しない親子関係を偽装してしまう。
+    new_parents = None if is_other else {k: parent_key for k in keys}
     projected = _simulate(
         articles,
         rules,
         tag_moves=tag_moves,
         demote=set(),
         new_priorities={k: new_priority for k in keys},
+        new_parents=new_parents,
     )
     children = tuple(
         ProposedChild(key=key, label_ja=tag, tags=(tag,), estimated_unread=projected[key])
