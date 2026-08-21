@@ -46,6 +46,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const [excludeManageMode, setExcludeManageMode] = useState(false);
   const [newExcludePattern, setNewExcludePattern] = useState('');
   const [showGenreManager, setShowGenreManager] = useState(false);
+  const [feedToolsOpen, setFeedToolsOpen] = useState(false);
   const opmlFileRef = useRef<HTMLInputElement>(null);
   const articlesFileRef = useRef<HTMLInputElement>(null);
 
@@ -189,32 +190,54 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           )}
         </button>
 
+        {/* Saved 記事の入出力は、対象である Saved ビューの直下に置く */}
+        <div className="flex gap-1 px-1">
+          <button
+            onClick={() => articlesFileRef.current?.click()}
+            disabled={importArticles.isPending}
+            className="flex-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
+          >
+            {importArticles.isPending ? 'Importing...' : 'Import Saved'}
+          </button>
+          <a
+            href={savedArticlesExportUrl}
+            download
+            className="flex-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded text-center"
+          >
+            Export Saved
+          </a>
+        </div>
+        {importArticles.isSuccess && (
+          <p className="px-2 text-xs text-green-600">
+            Imported {importArticles.data.articles_created} articles, {importArticles.data.feeds_created} feeds
+          </p>
+        )}
+        {importArticles.isError && (
+          <p className="px-2 text-xs text-red-500">{(importArticles.error as Error).message}</p>
+        )}
+
         {/* Tag management section — filter chips live in the Saved view now.
             Keep rename/delete and batch ops (JA補完 / AI tag) accessible here via ⚙. */}
         {tags && tags.length > 0 && (
           <>
             <hr className="my-2 border-gray-200 dark:border-gray-700" />
-            <div className="flex items-center justify-between px-3 pt-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Tags</span>
-                <button
-                  onClick={onToggleTagLang}
-                  className="flex items-center text-xs gap-0.5 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:border-gray-400 leading-none"
-                  title="Toggle tag language"
-                >
-                  <span className={tagLang === 'en' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>EN</span>
-                  <span className="text-gray-300 dark:text-gray-600">|</span>
-                  <span className={tagLang === 'ja' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>JA</span>
-                </button>
-              </div>
+            <SectionHeading label="タグ">
               <button
-                onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}
-                className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
-                title={tagManageMode ? 'Done' : 'Manage tags'}
+                onClick={onToggleTagLang}
+                className="flex items-center text-xs gap-0.5 px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 hover:border-gray-400 leading-none"
+                title="Toggle tag language"
               >
-                {tagManageMode ? 'Done' : '⚙'}
+                <span className={tagLang === 'en' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>EN</span>
+                <span className="text-gray-300 dark:text-gray-600">|</span>
+                <span className={tagLang === 'ja' ? 'font-bold text-gray-700 dark:text-gray-200' : 'text-gray-400'}>JA</span>
               </button>
-            </div>
+              <IconButton
+                label="⚙"
+                title="タグ管理（名前の変更・削除・一括タグ付け）"
+                active={tagManageMode}
+                onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}
+              />
+            </SectionHeading>
             {tagManageMode && (
               <div className="flex items-center gap-2 px-3 pt-1 whitespace-nowrap">
                 <button
@@ -296,10 +319,28 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         {/* ジャンル別ナビゲーション。件数 0 のジャンルは API が返さないのでそのまま並べる。
             親の未読が閾値を超えたときだけ子を展開する（超えていなければ従来通り 1 行） */}
-        {genreCounts && genreCounts.length > 0 && (
-          <div className="mt-4">
-            <div className="px-2 mb-1 text-xs font-semibold text-gray-400">ジャンル</div>
-            {genreCounts.map((g) => {
+        <div className="mt-4">
+          <SectionHeading label="ジャンル">
+            <IconButton
+              label="⚙"
+              title="ジャンル管理（タグの割り当てと優先順位）"
+              active={showGenreManager}
+              badge={pendingSplits}
+              badgeTitle={`未読が上限を超えたジャンルの分割提案が ${pendingSplits} 件あります`}
+              onClick={() => setShowGenreManager(m => !m)}
+            />
+          </SectionHeading>
+          {showGenreManager && (
+            <GenreManagerModal
+              filters={filters}
+              onFilterChange={onFilterChange}
+              onNavigateToOther={() => {
+                setShowGenreManager(false);
+                onFilterChange({ ...filters, genre: 'other', genre_exact: undefined, dismissed: undefined });
+              }}
+            />
+          )}
+          {genreCounts?.map((g) => {
               // 表示中の束が閾値を割った瞬間に選択中の行が消えないよう、
               // その親配下を見ている間は件数に関わらず展開したままにする
               const viewingHere =
@@ -344,27 +385,101 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                   )}
                 </div>
               );
-            })}
-          </div>
-        )}
-
-        {/* 非表示にした記事（ジャンルで束にした未読を「後回し」にした記事）の一覧 */}
-        <button
-          onClick={() => onFilterChange({
-            ...filters, dismissed: true, genre: undefined, genre_exact: undefined,
-            feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined,
-            recommended: undefined, unrecommended: undefined, extract_failed: undefined,
           })}
-          className={`w-full px-2 py-1 text-sm text-left rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
-            filters.dismissed ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
-          }`}
-        >
-          非表示にした記事
-        </button>
+
+          {/* 非表示にした記事（ジャンルで束にした未読を「後回し」にした記事）の一覧 */}
+          <button
+            onClick={() => onFilterChange({
+              ...filters, dismissed: true, genre: undefined, genre_exact: undefined,
+              feed_id: undefined, is_saved: undefined, tag_id: undefined, untagged: undefined,
+              recommended: undefined, unrecommended: undefined, extract_failed: undefined,
+            })}
+            className={`w-full px-2 py-1 text-sm text-left rounded hover:bg-gray-100 dark:hover:bg-gray-800 ${
+              filters.dismissed ? 'bg-gray-200 dark:bg-gray-800 font-semibold' : ''
+            }`}
+          >
+            非表示にした記事
+          </button>
+        </div>
 
         <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
-        {/* Feed list */}
+        {/* フィード一覧。整理系の操作は「何を整理するのか」の隣にあるべきなので、
+            重複記事と除外パターンは見出しの ⚙ にまとめて畳んでおく */}
+        <SectionHeading label="フィード">
+          <IconButton
+            label="⚙"
+            title="フィードの整理（重複記事・除外パターン）"
+            active={feedToolsOpen}
+            onClick={() => { setFeedToolsOpen(o => !o); setExcludeManageMode(false); }}
+          />
+        </SectionHeading>
+        {feedToolsOpen && (
+          <div className="px-2 pb-1 space-y-1">
+            <div className="flex gap-1">
+              <button
+                onClick={handleDedup}
+                disabled={dedupArticles.isPending}
+                className="flex-1 px-1 py-1.5 text-xs whitespace-nowrap text-gray-500 border border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
+                title="フィード横断で同一URLの重複記事を検出し、はてなブックマーク由来を優先して削除する"
+              >
+                {dedupArticles.isPending ? '確認中...' : '重複記事を整理'}
+              </button>
+              <button
+                onClick={() => setExcludeManageMode(m => !m)}
+                className={`flex-1 px-1 py-1.5 text-xs whitespace-nowrap rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-800 ${
+                  excludeManageMode ? 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-200' : 'text-gray-500'
+                }`}
+                title="URLパターンに一致する記事をフェッチ時にスキップする"
+              >
+                除外パターン管理
+              </button>
+            </div>
+            {dedupArticles.isSuccess && dedupArticles.data.dry_run === false && (
+              <p className="text-xs text-green-600">
+                重複記事 {dedupArticles.data.deleted} 件を削除しました
+              </p>
+            )}
+            {dedupArticles.isError && (
+              <p className="text-xs text-red-500">{(dedupArticles.error as Error).message}</p>
+            )}
+            {excludeManageMode && (
+              <div className="space-y-1">
+                {excludePatterns?.map((p) => (
+                  <div key={p.id} className="flex items-center gap-1 group">
+                    <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">{p.pattern}</span>
+                    <button
+                      onClick={() => { if (confirm(`パターン "${p.pattern}" を削除しますか?`)) deleteExcludePattern.mutate(p.id); }}
+                      className="text-gray-400 hover:text-red-500 text-sm px-1 leading-none"
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <form onSubmit={handleAddExcludePattern} className="flex gap-1">
+                  <input
+                    type="text"
+                    value={newExcludePattern}
+                    onChange={(e) => setNewExcludePattern(e.target.value)}
+                    placeholder="例: tonarinoyj.jp/episode/*"
+                    className="flex-1 min-w-0 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
+                  />
+                  <button
+                    type="submit"
+                    disabled={createExcludePattern.isPending}
+                    className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                  >
+                    追加
+                  </button>
+                </form>
+                {createExcludePattern.isError && (
+                  <p className="text-xs text-red-500">{(createExcludePattern.error as Error).message}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {isLoading && <div className="flex justify-center py-3"><Spinner size="sm" /></div>}
         {feeds?.map((feed) => (
           <div key={feed.id} className="group flex items-center">
@@ -404,12 +519,10 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             </div>
           </div>
         ))}
-      </nav>
 
-      {/* Add feed + Import/Export */}
-      <div className="p-2 border-t border-gray-200 dark:border-gray-700 space-y-1">
+        {/* フィードの追加と購読リスト（OPML）の入出力は、フィード一覧の続きに置く */}
         {showAdd ? (
-          <form onSubmit={handleAdd} className="space-y-2">
+          <form onSubmit={handleAdd} className="px-1 pt-1 space-y-2">
             <input
               type="url"
               value={newUrl}
@@ -439,147 +552,42 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             )}
           </form>
         ) : (
-          <>
-            <button
-              onClick={() => setShowAdd(true)}
-              className="w-full px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
-            >
-              + Add Feed
-            </button>
-            <div className="flex gap-1">
-              <button
-                onClick={() => opmlFileRef.current?.click()}
-                disabled={importOpml.isPending}
-                className="flex-1 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
-              >
-                {importOpml.isPending ? 'Importing...' : 'Import OPML'}
-              </button>
-              <a
-                href={opmlExportUrl}
-                download
-                className="flex-1 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded text-center"
-              >
-                Export OPML
-              </a>
-            </div>
-            <div className="flex gap-1">
-              <button
-                onClick={() => articlesFileRef.current?.click()}
-                disabled={importArticles.isPending}
-                className="flex-1 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
-              >
-                {importArticles.isPending ? 'Importing...' : 'Import Saved (JSON)'}
-              </button>
-              <a
-                href={savedArticlesExportUrl}
-                download
-                className="flex-1 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded text-center"
-              >
-                Export Saved (JSON)
-              </a>
-            </div>
-            {importOpml.isSuccess && (
-              <p className="text-xs text-green-600">
-                Imported {importOpml.data.created} feeds ({importOpml.data.skipped} skipped)
-              </p>
-            )}
-            {importArticles.isSuccess && (
-              <p className="text-xs text-green-600">
-                Imported {importArticles.data.articles_created} articles, {importArticles.data.feeds_created} feeds
-              </p>
-            )}
-            {importArticles.isError && (
-              <p className="text-xs text-red-500">{(importArticles.error as Error).message}</p>
-            )}
-            <button
-              onClick={handleDedup}
-              disabled={dedupArticles.isPending}
-              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
-              title="フィード横断で同一URLの重複記事を検出し、はてなブックマーク由来を優先して削除する"
-            >
-              {dedupArticles.isPending ? '確認中...' : '重複記事を整理'}
-            </button>
-            {dedupArticles.isSuccess && dedupArticles.data.dry_run === false && (
-              <p className="text-xs text-green-600">
-                重複記事 {dedupArticles.data.deleted} 件を削除しました
-              </p>
-            )}
-            {dedupArticles.isError && (
-              <p className="text-xs text-red-500">{(dedupArticles.error as Error).message}</p>
-            )}
-            <button
-              onClick={() => setExcludeManageMode(m => !m)}
-              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
-              title="URLパターンに一致する記事をフェッチ時にスキップする"
-            >
-              {excludeManageMode ? '除外パターン管理を閉じる' : '除外パターン管理'}
-            </button>
-            {excludeManageMode && (
-              <div className="space-y-1 px-1">
-                {excludePatterns?.map((p) => (
-                  <div key={p.id} className="flex items-center gap-1 group">
-                    <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">{p.pattern}</span>
-                    <button
-                      onClick={() => { if (confirm(`パターン "${p.pattern}" を削除しますか?`)) deleteExcludePattern.mutate(p.id); }}
-                      className="text-gray-400 hover:text-red-500 text-sm px-1 leading-none"
-                      title="Delete"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-                <form onSubmit={handleAddExcludePattern} className="flex gap-1">
-                  <input
-                    type="text"
-                    value={newExcludePattern}
-                    onChange={(e) => setNewExcludePattern(e.target.value)}
-                    placeholder="例: tonarinoyj.jp/episode/*"
-                    className="flex-1 min-w-0 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
-                  />
-                  <button
-                    type="submit"
-                    disabled={createExcludePattern.isPending}
-                    className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    追加
-                  </button>
-                </form>
-                {createExcludePattern.isError && (
-                  <p className="text-xs text-red-500">{(createExcludePattern.error as Error).message}</p>
-                )}
-              </div>
-            )}
-            <button
-              onClick={() => setShowGenreManager(m => !m)}
-              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded flex items-center justify-center gap-1.5"
-              title="どのタグをどのジャンルに割り当てるか、ジャンルの優先順位を編集する"
-            >
-              <span>{showGenreManager ? 'ジャンル管理を閉じる' : 'ジャンル管理'}</span>
-              {pendingSplits > 0 && (
-                <span
-                  className="rounded-full bg-amber-500 px-1.5 text-[10px] font-medium text-white"
-                  title={`未読が上限を超えたジャンルの分割提案が ${pendingSplits} 件あります`}
-                >
-                  {pendingSplits}
-                </span>
-              )}
-            </button>
-            {showGenreManager && (
-              <GenreManagerModal
-                filters={filters}
-                onFilterChange={onFilterChange}
-                onNavigateToOther={() => {
-                  setShowGenreManager(false);
-                  onFilterChange({ ...filters, genre: 'other', genre_exact: undefined, dismissed: undefined });
-                }}
-              />
-            )}
-          </>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="w-full px-3 py-2 text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
+          >
+            + Add Feed
+          </button>
         )}
+        <div className="flex gap-1 px-1">
+          <button
+            onClick={() => opmlFileRef.current?.click()}
+            disabled={importOpml.isPending}
+            className="flex-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
+          >
+            {importOpml.isPending ? 'Importing...' : 'Import OPML'}
+          </button>
+          <a
+            href={opmlExportUrl}
+            download
+            className="flex-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded text-center"
+          >
+            Export OPML
+          </a>
+        </div>
+        {importOpml.isSuccess && (
+          <p className="px-2 text-xs text-green-600">
+            Imported {importOpml.data.created} feeds ({importOpml.data.skipped} skipped)
+          </p>
+        )}
+      </nav>
+
+      {/* 下段は常に見えていてほしい状態表示だけを残す */}
+      <div className="p-2 border-t border-gray-200 dark:border-gray-700 space-y-1">
         <input ref={opmlFileRef} type="file" accept=".opml,.xml" onChange={handleOpmlImport} className="hidden" />
         <input ref={articlesFileRef} type="file" accept=".json" onChange={handleArticlesImport} className="hidden" />
         {aiStatus && aiPendingLabel && (
-          <div className="mt-2 px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+          <div className="px-1 py-1.5 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
             {aiStatus.available && <Spinner size="sm" />}
             <span>
               {aiStatus.available ? 'AI処理中' : 'AI待機中'}{' — '}
@@ -633,6 +641,52 @@ function GenreNavRow({
       >
         {count}
       </span>
+    </button>
+  );
+}
+
+/** タグ / ジャンル / フィードの見出し行。管理操作は右端の ⚙ に集約する */
+function SectionHeading({ label, children }: { label: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-2 pt-1 pb-0.5">
+      <span className="text-xs font-semibold text-gray-400">{label}</span>
+      <div className="flex items-center gap-1">{children}</div>
+    </div>
+  );
+}
+
+/** 見出し行の管理ボタン。12px の裸の記号では何のマークか読めなかったので、
+    16px の記号と 24px の当たり判定を確保する。開閉は文字の差し替えではなく
+    背景で示す（ラベルの幅が変わると見出し行が揺れるため） */
+function IconButton({
+  label, title, active, onClick, badge, badgeTitle,
+}: {
+  label: string;
+  title: string;
+  active?: boolean;
+  onClick: () => void;
+  badge?: number;
+  badgeTitle?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded text-base leading-none ${
+        active
+          ? 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+          : 'text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300'
+      }`}
+    >
+      {label}
+      {!!badge && (
+        <span
+          className="absolute -top-0.5 -right-0.5 rounded-full bg-amber-500 px-1 text-[10px] font-medium leading-tight text-white"
+          title={badgeTitle}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
