@@ -30,7 +30,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - OPML import / export
 - Saved articles import (Inoreader / Google Reader JSON format)
 - Cross-feed duplicate cleanup — matches articles by normalized URL (tracking params/fragment stripped), keeping saved > non-Hatena-Bookmark > oldest fetched, and merges read/saved state and tags from the removed copy. Runs automatically after each scheduled fetch, plus an on-demand "重複記事を整理" button behind the sidebar's フィード ⚙ with a dry-run preview
-- Sidebar management sits next to what it manages — each section heading (タグ / ジャンル / フィード) carries a ⚙ that unfolds only its own tools (tag rename and bulk tagging / the genre dictionary and split suggestions / duplicate cleanup and exclude patterns), and each import-export pair sits with its subject (Saved JSON under ★ Saved, OPML under the feed list next to + Add Feed)
+- Sidebar management sits next to what it manages — each section heading (タグ / ジャンル / フィード) carries a ⚙ that unfolds only its own tools (tag rename and bulk tagging / the genre dictionary and split suggestions / duplicate cleanup, exclude patterns and the OPML import/export), and Saved-article JSON import/export sits directly under ★ Saved. `+ Add Feed` is the last row of the feed list
 - Keyboard shortcuts (`j`/`k` navigation, `s` save, `/` search)
 - Mobile top bar shows the current category, view total, and overall unread count
 - Dark mode support
