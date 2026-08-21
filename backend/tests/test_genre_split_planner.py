@@ -52,12 +52,68 @@ def test_split_own_tags_puts_every_bin_under_the_limit() -> None:
     assert proposal.genre_key == "dev_prog"
     assert proposal.before == 90
     assert proposal.projected_max <= 50
+    # 対象ジャンル自身の適用後件数（projected_target）は、受け皿(python)だけが
+    # 残るので 30 件になる。ここでは無関係ジャンルが絡まないので projected_max
+    # と同値になる
+    assert proposal.projected_target == 30
     # 新しい兄弟が実際に記事を引き取っている（キーの辞書順で負けていない）
     assert proposal.children
     assert all(c.estimated_unread > 0 for c in proposal.children)
     # 提案されたタグの合計が元の担当タグの部分集合になっている
     proposed_tags = {t for c in proposal.children for t in c.tags}
     assert proposed_tags <= {"python", "rust", "api"}
+
+
+def test_split_own_tags_rejects_a_plan_whose_real_reclassification_overflows_a_sibling() -> None:
+    """貪欲ビン詰めの想定件数はあくまで見積もりで、実際の再分類はそれとは食い違いうる。
+
+    dev_prog（担当タグ python/rust/api）と、独立した既存の兄弟 dev_infra
+    （担当タグ docker）がある。dev と dev_infra は priority 1 で同順位、
+    "dev_infra" は辞書順で "dev_prog" より前なので、"api"+"docker" を両方持つ
+    記事は今は dev_infra に落ちている（同順位のタイは dev_infra が勝つ）。
+
+    dev_prog を分割すると、api は新しい兄弟 dev_api（親と同じ priority 1）に
+    移る。ここでタイの勝敗が入れ替わる: "dev_api" は辞書順で "dev_infra" より
+    前になるため、同じ「api+docker」記事は今度は dev_api に転入する。この
+    記事は元々 dev_prog の集計（"mine"）に入っていなかったので、貪欲ビン詰めの
+    見積もり（api だけで 20 件）には現れない——だが実際の再分類では
+    api-only(20) + api+docker(35) = 55 件が dev_api に落ち、上限 50 を超える。
+
+    この「実測が見積もりを上回る」効果は、対象ジャンル自身の担当タグの
+    組み合わせ（同じジャンルの複数タグを同時に持つ記事）では起きない
+    （複数タグが同じビンに入る限り重複計上にしかならず、実測は見積もり以下
+    にしかならない）。無関係な既存ジャンルとタグを共有する記事があって
+    初めて、見積もりを超えて転入が起きる——これが「ジャンル境界を越える
+    複数タグ」が必要な理由。
+
+    affected_max のガード（#3 で追加）が無いと、この案は projected_max=55
+    のまま採用されてしまう（このテストは新ガードを外すと FAIL する——
+    別途ミューテーションテストで確認済み。レポート参照）。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"python": "dev_prog", "rust": "dev_prog", "api": "dev_prog", "docker": "dev_infra"},
+        priority={"dev": 1, "dev_prog": 1, "dev_infra": 1},
+        parent={"dev_prog": "dev", "dev_infra": "dev"},
+    )
+    articles = (
+        [(i, ["python"]) for i in range(30)]
+        + [(100 + i, ["rust"]) for i in range(30)]
+        + [(200 + i, ["api"]) for i in range(20)]
+        + [(300 + i, ["docker"]) for i in range(45)]
+        # 今は dev_infra に落ちている（"dev_infra" < "dev_prog" のタイで勝つ）。
+        # dev_prog の "mine" 集計には入らないので、貪欲ビン詰めの見積もりには
+        # 現れない未知の転入元になる
+        + [(400 + i, ["api", "docker"]) for i in range(35)]
+    )
+
+    proposals = [
+        p
+        for p in plan_splits(articles, rules, limit=50)
+        if p.genre_key == "dev_prog" and p.strategy == "split_own_tags"
+    ]
+    assert proposals == []
 
 
 def test_split_own_tags_children_are_siblings_under_the_same_parent() -> None:
@@ -256,6 +312,10 @@ def test_demote_generic_accepts_a_fix_that_pushes_a_near_full_genre_over() -> No
     assert proposal.before == 54
     assert proposal.demote_tags == ("ai",)
     assert proposal.projected_max == 51  # limit(50) を超えるが、54 からは厳密に改善している
+    # projected_max(51) は譲り先 security の適用後件数。ai_misc 自身
+    # （projected_target）は 49 まで縮んでおり、この 2 つを混同すると
+    # 「54→51 で 3 件の改善」に見えてしまうが実際は「54→49 の劇的な改善」（#2）
+    assert proposal.projected_target == 49
 
 
 def test_demote_generic_still_rejects_a_fix_that_makes_the_worst_case_worse() -> None:
@@ -316,6 +376,8 @@ def test_promote_free_tags_creates_siblings_from_unruled_cooccurring_tags() -> N
     proposal = proposals[0]
     assert proposal.before == 60
     assert proposal.projected_max <= 50
+    # ai_misc 自身は ai だけの記事(25 件)だけが残る
+    assert proposal.projected_target == 25
     assert {t for c in proposal.children for t in c.tags} == {"agent", "benchmark"}
     assert all(c.key.startswith("ai_") for c in proposal.children)
 

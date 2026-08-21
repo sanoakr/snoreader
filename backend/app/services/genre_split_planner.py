@@ -52,7 +52,14 @@ class SplitProposal:
     genre_key: str
     strategy: str
     before: int
+    # 影響を受ける（対象ジャンル自身を含む）バケット群の、適用後の最大件数。
+    # 対象ジャンル自身の適用後件数ではないので UI で誤読させない（#2）
     projected_max: int
+    # 対象ジャンル genre_key 自身の適用後の実測件数。projected_max とは別物:
+    # 例えば demote_generic では対象ジャンルは大きく縮む一方、譲り先の
+    # 既存ジャンルが上限をわずかに超えることがあり、その場合 projected_max は
+    # 譲り先の件数、projected_target は対象ジャンル自身の件数になる
+    projected_target: int
     children: tuple[ProposedChild, ...]
     demote_tags: tuple[str, ...] = ()
 
@@ -127,10 +134,14 @@ def _own_tags(genre_key: str, rules: GenreRules) -> list[str]:
     return [t for t, g in rules.tag_to_genre.items() if g == genre_key]
 
 
+def _slugify(tag: str) -> str:
+    """ジャンルキーに使える形にタグ名を正規化する（非英数字を _ にする）。"""
+    return "".join(ch if ch.isalnum() else "_" for ch in tag.lower())
+
+
 def _sibling_key(parent_key: str, tag: str) -> str:
     """新しい兄弟のキー。親キーの接頭辞を保ち、タグ名の非英数字を _ にする。"""
-    slug = "".join(ch if ch.isalnum() else "_" for ch in tag.lower())
-    return f"{parent_key}_{slug}"
+    return f"{parent_key}_{_slugify(tag)}"
 
 
 def _plan_split_own_tags(
@@ -207,13 +218,23 @@ def _plan_split_own_tags(
         return None
     if projected[genre_key] > limit:
         return None
+    # 貪欲ビン詰めは「今 genre_key に落ちている記事」の担当タグ件数だけを見て
+    # 詰めており、新しい兄弟の priority は親と同じに揃う。そのため、今は
+    # 別ジャンルに分類されている記事（今の優先順位ではそちらが勝っている）が、
+    # 新兄弟の priority との同値解決（キー辞書順）で新兄弟側に転入することがある
+    # ——ビン詰めの想定件数を超えて実際の受け皿が上限を超えうる。B（promote_free_tags）
+    # と同じガードをここにも掛ける（#3）
+    projected_max = _affected_max(current, projected, genre_key)
+    if projected_max > limit:
+        return None
     # movable[0] (= ranked[0] の次) 以降を各ビンに詰めているので、最多タグは
     # ranked[0] のまま元ジャンルに残っている（tag_moves に含めていない）
     return SplitProposal(
         genre_key=genre_key,
         strategy="split_own_tags",
         before=before,
-        projected_max=_affected_max(current, projected, genre_key),
+        projected_max=projected_max,
+        projected_target=projected[genre_key],
         children=children,
     )
 
@@ -271,6 +292,7 @@ def _plan_demote_generic(
         strategy="demote_generic",
         before=before,
         projected_max=projected_max,
+        projected_target=projected[genre_key],
         children=(),
         demote_tags=receptacle,
     )
@@ -307,7 +329,10 @@ def _plan_promote_free_tags(
     keys: list[str] = []
     seen_keys: set[str] = set()
     for tag, _c in candidates:
-        key = tag if is_other else _sibling_key(parent_key, tag)
+        # other 由来のトップレベルは接頭辞を持たないが、キー自体はやはり
+        # ジャンルキーとして正規化する。"node.js" や "c++" のような記号入りの
+        # タグをそのままキーにすると不正なキーになる（#9）
+        key = _slugify(tag) if is_other else _sibling_key(parent_key, tag)
         # 既存キーと衝突、この提案内での重複はいずれも作れない
         if key == genre_key or key in rules.priority or key in seen_keys:
             return None
@@ -355,6 +380,7 @@ def _plan_promote_free_tags(
         strategy="promote_free_tags",
         before=before,
         projected_max=projected_max,
+        projected_target=projected[genre_key],
         children=children,
     )
 
