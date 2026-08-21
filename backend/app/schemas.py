@@ -199,6 +199,27 @@ class SeedSubgenresResult(BaseModel):
     reclassified: int
 
 
+# --- Genre split suggestions ---
+
+class ProposedChildOut(BaseModel):
+    key: str
+    label_ja: str
+    tags: list[str]
+    estimated_unread: int
+
+
+class SplitSuggestionOut(BaseModel):
+    id: int
+    genre_key: str
+    strategy: str
+    # 検知時の未読件数（モデルの列名は before_count。SQL 予約語を避けている）
+    before: int
+    projected_max: int
+    children: list[ProposedChildOut] = []
+    demote_tags: list[str] = []
+    created_at: str
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):
