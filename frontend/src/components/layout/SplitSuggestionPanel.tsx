@@ -29,8 +29,6 @@ export function SplitSuggestionPanel() {
 
   const items = suggestions ?? [];
 
-  if (items.length === 0) return null;
-
   const editedLabels = (s: SplitSuggestion) => {
     const edited = labels[s.id] ?? {};
     const out: Record<string, string> = {};
@@ -54,6 +52,12 @@ export function SplitSuggestionPanel() {
           再計算
         </button>
       </div>
+
+      {items.length === 0 && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          未読が上限を超えたジャンルはありません。
+        </p>
+      )}
 
       {items.map((s) => (
         <div

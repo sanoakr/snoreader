@@ -298,17 +298,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             親の未読が閾値を超えたときだけ子を展開する（超えていなければ従来通り 1 行） */}
         {genreCounts && genreCounts.length > 0 && (
           <div className="mt-4">
-            <div className="px-2 mb-1 flex items-center gap-1.5 text-xs font-semibold text-gray-400">
-              <span>ジャンル</span>
-              {pendingSplits > 0 && (
-                <span
-                  className="rounded-full bg-amber-500 px-1.5 text-[10px] font-medium text-white"
-                  title={`未読が上限を超えたジャンルの分割提案が ${pendingSplits} 件あります`}
-                >
-                  {pendingSplits}
-                </span>
-              )}
-            </div>
+            <div className="px-2 mb-1 text-xs font-semibold text-gray-400">ジャンル</div>
             {genreCounts.map((g) => {
               // 表示中の束が閾値を割った瞬間に選択中の行が消えないよう、
               // その親配下を見ている間は件数に関わらず展開したままにする
@@ -371,6 +361,8 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
         >
           非表示にした記事
         </button>
+
+        <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
         {/* Feed list */}
         {isLoading && <div className="flex justify-center py-3"><Spinner size="sm" /></div>}
