@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ChatSuggestionsResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ChatSuggestionsResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, SplitSuggestion, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -166,6 +166,31 @@ export function createGenreRule(body: { tag: string; genre_id: number; is_generi
 
 export function deleteGenreRule(id: number): Promise<{ reclassified: number }> {
   return fetchJSON(`${BASE}/genre-rules/${id}`, { method: 'DELETE' });
+}
+
+// --- Genre split suggestions ---
+
+export function getSplitSuggestions(): Promise<SplitSuggestion[]> {
+  return fetchJSON(`${BASE}/genres/split-suggestions`);
+}
+
+export function refreshSplitSuggestions(): Promise<{ created: number }> {
+  return fetchJSON(`${BASE}/genres/split-suggestions/refresh`, { method: 'POST' });
+}
+
+export function applySplitSuggestion(
+  id: number,
+  labels: Record<string, string>,
+): Promise<{ created: number; moved: number; reclassified: number }> {
+  return fetchJSON(`${BASE}/genres/split-suggestions/${id}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels }),
+  });
+}
+
+export function dismissSplitSuggestion(id: number): Promise<{ dismissed: number }> {
+  return fetchJSON(`${BASE}/genres/split-suggestions/${id}/dismiss`, { method: 'POST' });
 }
 
 // --- Exclude patterns ---

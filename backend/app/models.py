@@ -124,6 +124,32 @@ class GenreRule(Base):
     genre: Mapped["Genre"] = relationship(back_populates="rules")
 
 
+class GenreSplitSuggestion(Base):
+    """未読が上限を超えた葉ジャンルの分割案。
+
+    検知はフィード取得サイクル（1 時間ごと）、閲覧は後から。LaunchAgent は
+    make deploy で頻繁に再起動するのでメモリ保持では LLM 命名をやり直すことになる。
+    「無視」も永続が必要で、dismissed_at_count より未読が増えたときだけ再提案する。
+    """
+
+    __tablename__ = "genre_split_suggestions"
+    __table_args__ = (Index("idx_split_suggestions_genre_key", "genre_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # 超過していた葉ジャンルのキー。other は genres に行を持たないので FK にはしない
+    genre_key: Mapped[str] = mapped_column(String, nullable=False)
+    strategy: Mapped[str] = mapped_column(String, nullable=False)
+    # SplitProposal の JSON シリアライズ
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    # before は SQL 予約語なので列名を変える（API では before で出す）
+    before_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    projected_max: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, default=_utcnow)
+    dismissed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 無視した時点の未読件数。これより増えるまで再提案しない
+    dismissed_at_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class Tag(Base):
     __tablename__ = "tags"
 

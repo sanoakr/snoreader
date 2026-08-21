@@ -85,10 +85,12 @@ async def load_rules(session: AsyncSession) -> GenreRules:
     ルール表は 150 行程度と小さいのでキャッシュは持たない。多数の記事を回す
     ときだけ、呼び出し側がループの外で 1 回呼ぶこと。
     """
-    genre_rows = (await session.execute(select(Genre.id, Genre.key, Genre.parent_id))).all()
-    key_by_id = {gid: key for gid, key, _parent in genre_rows}
+    genre_rows = (
+        await session.execute(select(Genre.id, Genre.key, Genre.parent_id, Genre.priority))
+    ).all()
+    key_by_id = {gid: key for gid, key, _parent, _prio in genre_rows}
     parent: dict[str, str] = {}
-    for _gid, key, parent_id in genre_rows:
+    for _gid, key, parent_id, _prio in genre_rows:
         parent_key = key_by_id.get(parent_id) if parent_id is not None else None
         if parent_key:
             parent[key] = parent_key
@@ -107,9 +109,14 @@ async def load_rules(session: AsyncSession) -> GenreRules:
     for tag, is_generic, key, prio in rows:
         (generic_to_genre if is_generic else tag_to_genre)[tag] = key
         priority[key] = prio
-    # ルールを持たない親も priority を引けるようにする
-    for _gid, key, _parent_id in genre_rows:
-        priority.setdefault(key, _FALLBACK_PRIORITY)
+    # ルールを持たない親（例: seed-subgenres で自分のタグを全部子へ譲った "ai"）
+    # にも実際の Genre.priority を入れる。子孫優先のプルーニングが働く classify()
+    # 自体はルールを持たない genre を hit として拾わないので影響しないが、
+    # genre_split_planner が新しい兄弟に「親と同じ priority」を継がせるときに
+    # ここでセンチネル値 (_FALLBACK_PRIORITY) を返すと、新しい兄弟が既存の
+    # 兄弟とのタイブレークに必ず負けて 0 件案として棄却されてしまう
+    for _gid, key, _parent_id, real_priority in genre_rows:
+        priority.setdefault(key, real_priority)
     return GenreRules(tag_to_genre, generic_to_genre, priority, parent)
 
 

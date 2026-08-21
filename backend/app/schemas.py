@@ -199,6 +199,46 @@ class SeedSubgenresResult(BaseModel):
     reclassified: int
 
 
+# --- Genre split suggestions ---
+
+class ProposedChildOut(BaseModel):
+    key: str
+    label_ja: str
+    tags: list[str]
+    estimated_unread: int
+
+
+class SplitSuggestionOut(BaseModel):
+    id: int
+    genre_key: str
+    strategy: str
+    # 検知時の未読件数（モデルの列名は before_count。SQL 予約語を避けている）
+    before: int
+    # 影響を受ける（genre_key 自身を含む）バケット群の、適用後の最大件数。
+    # genre_key 自身の適用後件数ではない（それは projected_target）
+    projected_max: int
+    # genre_key 自身の適用後の実測件数。demote_generic では大きく縮む一方、
+    # 譲り先の既存ジャンルが projected_max 側で上限をわずかに超えることがある
+    projected_target: int
+    children: list[ProposedChildOut] = []
+    demote_tags: list[str] = []
+    created_at: str
+    # バックエンドの有効な genre_unread_limit（env で上書きされうる）。
+    # フロントエンドがこの値をハードコードしないよう、都度ここで渡す
+    limit: int
+
+
+class ApplySuggestionBody(BaseModel):
+    # {child_key: label_ja} の上書き。承認ダイアログで直した名前が入る
+    labels: dict[str, str] = {}
+
+
+class ApplySuggestionResult(BaseModel):
+    created: int
+    moved: int
+    reclassified: int
+
+
 # --- Pagination ---
 
 class PaginatedArticles(BaseModel):

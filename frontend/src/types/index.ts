@@ -130,3 +130,29 @@ export interface ChatSuggestionsResponse {
   /** この応答が LLM 生成によるものか（キャッシュ返却なら false） */
   generated: boolean;
 }
+
+export interface ProposedChild {
+  key: string;
+  label_ja: string;
+  tags: string[];
+  estimated_unread: number;
+}
+
+// 未読が上限を超えた葉ジャンルの分割案。件数はバックエンドで実際に分類し直した実測値
+export interface SplitSuggestion {
+  id: number;
+  genre_key: string;
+  strategy: string;
+  before: number;
+  /** 影響を受ける(genre_key 自身を含む)バケット群の、適用後の最大件数。
+   *  genre_key 自身の適用後件数ではない(それは projected_target) */
+  projected_max: number;
+  /** genre_key 自身の適用後の実測件数。projected_max とは別物:
+   *  demote_generic では対象ジャンルは大きく縮む一方、譲り先の既存ジャンルが
+   *  projected_max 側でわずかに上限を超えることがある */
+  projected_target: number;
+  children: ProposedChild[];
+  demote_tags: string[];
+  created_at: string;
+  limit: number;
+}

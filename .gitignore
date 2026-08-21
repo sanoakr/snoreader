@@ -29,3 +29,6 @@ logs/
 # Agent instructions (local only)
 AGENTS.md
 CLAUDE.md
+
+# SDD scratch (subagent-driven-development workspaces)
+.superpowers/

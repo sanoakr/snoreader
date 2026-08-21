@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite+aiosqlite:///{Path(__file__).resolve().parent.parent.parent / 'data' / 'snoreader.db'}"
     feed_fetch_interval_minutes: int = 60
     article_retention_days: int = 60
+    # 葉ジャンルの未読上限。超えると分割案を作る（一括 triage で確認できる上限）
+    genre_unread_limit: int = 50
     host: str = "0.0.0.0"
     port: int = 8000
 

@@ -8,6 +8,7 @@ import {
   useDeleteGenreRule,
   useSeedSubgenres,
 } from '../../hooks/useGenres';
+import { SplitSuggestionPanel } from './SplitSuggestionPanel';
 import type { ArticleFilters, GenreDef } from '../../types';
 
 // 新規ジャンルの初期優先度。数字が小さいほど分類時に優先される。
@@ -161,6 +162,7 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
 
   return (
     <div className="space-y-1 px-1">
+      <SplitSuggestionPanel />
       {tree.map(({ parent, children }) => (
         <div key={parent.id}>
           {renderGenre(parent, false)}

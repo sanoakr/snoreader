@@ -345,6 +345,154 @@ async def test_create_genre_rule_404_for_missing_genre(client: AsyncClient) -> N
 
 
 @pytest.mark.asyncio
+async def test_split_suggestion_endpoints_list_apply_and_dismiss(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """提案の一覧・適用・無視が API で通ること。LLM 命名はモックする。"""
+    import json
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Article, Feed
+
+    async def fake_name(tag_groups, **_kwargs):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    await client.post("/api/genres/seed-subgenres")
+
+    async with async_session() as session:
+        feed = Feed(title="t", url="http://example.com/feed")
+        session.add(feed)
+        await session.flush()
+        for n in range(60):
+            tags = ["ai", "agent"] if n < 30 else ["ai"]
+            session.add(
+                Article(
+                    feed_id=feed.id,
+                    guid=f"g{n}",
+                    url=f"http://example.com/{n}",
+                    title=f"a{n}",
+                    tag_suggestions=json.dumps(tags),
+                )
+            )
+        await session.commit()
+
+    refreshed = await client.post("/api/genres/split-suggestions/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["created"] > 0
+
+    listed = await client.get("/api/genres/split-suggestions")
+    assert listed.status_code == 200
+    items = listed.json()
+    assert items
+    # projected_max 昇順
+    assert [i["projected_max"] for i in items] == sorted(i["projected_max"] for i in items)
+    first = items[0]
+    assert first["before"] > 50
+    assert "children" in first and "demote_tags" in first
+
+    applied = await client.post(f"/api/genres/split-suggestions/{first['id']}/apply", json={})
+    assert applied.status_code == 200
+    body = applied.json()
+    assert set(body) == {"created", "moved", "reclassified"}
+
+    # 適用したら一覧から消える
+    after = await client.get("/api/genres/split-suggestions")
+    assert all(i["id"] != first["id"] for i in after.json())
+
+
+@pytest.mark.asyncio
+async def test_apply_unknown_suggestion_returns_404(client: AsyncClient) -> None:
+    res = await client.post("/api/genres/split-suggestions/9999/apply", json={})
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_dismiss_unknown_suggestion_returns_404(client: AsyncClient) -> None:
+    res = await client.post("/api/genres/split-suggestions/9999/dismiss")
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_apply_split_suggestions_registered_before_path_param_route(
+    client: AsyncClient,
+) -> None:
+    """/genres/split-suggestions が /genres/{genre_id} より前に登録されていること。
+
+    順序を間違えると FastAPI が "split-suggestions" を genre_id として解釈し、
+    パスパラメータの型検証で 422 を返す（404 にはならない）。実際に叩いて確認する。
+    """
+    res = await client.get("/api/genres/split-suggestions")
+    assert res.status_code == 200
+    assert res.json() == []  # まだ何も提案していない
+
+
+@pytest.mark.asyncio
+async def test_apply_stale_suggestion_returns_409(client: AsyncClient) -> None:
+    """辞書が変わった後に適用すると、子キーの親が食い違って 409 になること。"""
+    import json
+
+    from app.database import async_session
+    from app.models import GenreSplitSuggestion
+
+    genres = (await client.get("/api/genres")).json()
+    dev_id = next(g["id"] for g in genres if g["key"] == "dev")
+
+    # dev の子として conflict_child を先に作っておく（提案の想定と食い違わせる）
+    created = await client.post(
+        "/api/genres",
+        json={"key": "conflict_child", "label_ja": "衝突子", "priority": 10, "parent_id": dev_id},
+    )
+    assert created.status_code == 201
+
+    # ai を分割する提案を手動で仕込む。子キー conflict_child の親を ai だと想定しているが
+    # 実際は dev の子として既に存在するので、適用時に食い違いが検出されるはず
+    payload = json.dumps(
+        {
+            "genre_key": "ai",
+            "strategy": "split_own_tags",
+            "before": 60,
+            "projected_max": 10,
+            "projected_target": 10,
+            "children": [
+                {
+                    "key": "conflict_child",
+                    "label_ja": "衝突子",
+                    "tags": ["some-foo-tag"],
+                    "estimated_unread": 10,
+                }
+            ],
+            "demote_tags": [],
+        },
+        ensure_ascii=False,
+    )
+    async with async_session() as session:
+        session.add(
+            GenreSplitSuggestion(
+                genre_key="ai",
+                strategy="split_own_tags",
+                payload=payload,
+                before_count=60,
+                projected_max=10,
+            )
+        )
+        await session.commit()
+
+    listed = (await client.get("/api/genres/split-suggestions")).json()
+    suggestion_id = next(i["id"] for i in listed if i["genre_key"] == "ai")
+
+    res = await client.post(f"/api/genres/split-suggestions/{suggestion_id}/apply", json={})
+    assert res.status_code == 409
+    assert "conflict_child" in res.json()["detail"]
+
+    # 何も変更されていないこと（部分適用が残っていない）
+    still_listed = (await client.get("/api/genres/split-suggestions")).json()
+    assert any(i["id"] == suggestion_id for i in still_listed)
+
+
+@pytest.mark.asyncio
 async def test_list_articles_filters_by_genre(client: AsyncClient) -> None:
     from app.database import async_session
     from app.services.genre_classifier import reclassify_all
