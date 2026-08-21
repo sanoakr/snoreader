@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   useGenres,
   useCreateGenre,
@@ -17,14 +18,17 @@ const DEFAULT_NEW_GENRE_PRIORITY = 100;
 interface Props {
   // 「分類できなかった記事（その他）を見る」導線用。呼び出し元でモーダルを閉じて filter を切り替える。
   onNavigateToOther: () => void;
+  // 背景クリック・✕・Escape の 3 経路から閉じる
+  onClose: () => void;
   // 削除したジャンルが現在表示中のビューと同じ場合に、その絞り込みから抜けるために必要
   filters: ArticleFilters;
   onFilterChange: (f: ArticleFilters) => void;
 }
 
-// サイドバーの「ジャンル管理」セクションの内容。辞書（タグ→ジャンルの割り当て、優先順位）を編集する。
-// FeedSidebar.tsx が肥大化していたため別ファイルに切り出した。
-export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }: Props) {
+// ジャンル辞書（タグ→ジャンルの割り当て、優先順位）を編集するモーダル。
+// サイドバー幅 256px にインラインで開くと横も縦も溢れるため、body 直下のオーバーレイとして描く
+// （サイドバーの外側が transition-transform を持つので、portal を使わないと fixed の基準がずれる）。
+export function GenreManagerModal({ onNavigateToOther, onClose, filters, onFilterChange }: Props) {
   const { data: genres } = useGenres();
   const createGenre = useCreateGenre();
   const updateGenre = useUpdateGenre();
@@ -40,6 +44,21 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
   const [newGenreKey, setNewGenreKey] = useState('');
   const [newGenreLabel, setNewGenreLabel] = useState('');
   const [newGenreParentId, setNewGenreParentId] = useState<number | null>(null);
+
+  // 開いている間は Escape で閉じ、ArticleList / ArticleReader の window ショートカット
+  // （j/k/s/矢印/Space）を止める。あちらのガードは INPUT / TEXTAREA しか除外しないので、
+  // 「モーダルが開いている」ことを body の data 属性で共有する
+  useEffect(() => {
+    document.body.dataset.modalOpen = 'true';
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      delete document.body.dataset.modalOpen;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
 
   // タグ追加フォームの <select> は空の選択肢を持たないため、ユーザーがまだ選択していない間は
   // 先頭のジャンルを既定値として使う（state 自体は未選択のまま保つ。setState-in-effect を避けるため）。
@@ -160,9 +179,25 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
     </div>
   );
 
-  return (
-    <div className="space-y-1 px-1">
-      <SplitSuggestionPanel />
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/40 p-3 sm:p-6"
+      // 背景そのものを押したときだけ閉じる（パネル内でのドラッグ終了で閉じないよう target を見る）
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-900 sm:max-h-[calc(100vh-3rem)]">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">ジャンル管理</h2>
+          <button
+            onClick={onClose}
+            title="閉じる"
+            className="flex h-6 w-6 items-center justify-center rounded text-base leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="space-y-1 overflow-y-auto px-4 py-3">
+          <SplitSuggestionPanel />
       {tree.map(({ parent, children }) => (
         <div key={parent.id}>
           {renderGenre(parent, false)}
@@ -294,7 +329,10 @@ export function GenreManagerModal({ onNavigateToOther, filters, onFilterChange }
         >
           {seedSubgenres.isPending ? '投入中...' : '推奨サブジャンルを投入'}
         </button>
+        </div>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
