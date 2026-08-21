@@ -405,12 +405,12 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
 
         <hr className="my-2 border-gray-200 dark:border-gray-700" />
 
-        {/* フィード一覧。整理系の操作は「何を整理するのか」の隣にあるべきなので、
-            重複記事と除外パターンは見出しの ⚙ にまとめて畳んでおく */}
+        {/* フィード一覧。フィードそのものへの操作は「何に対する操作か」の隣にあるべきなので、
+            重複記事・除外パターン・OPML の入出力は見出しの ⚙ にまとめて畳んでおく */}
         <SectionHeading label="フィード">
           <IconButton
             label="⚙"
-            title="フィードの整理（重複記事・除外パターン）"
+            title="フィードの設定（重複記事・除外パターン・OPML）"
             active={feedToolsOpen}
             onClick={() => { setFeedToolsOpen(o => !o); setExcludeManageMode(false); }}
           />
@@ -443,6 +443,28 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             )}
             {dedupArticles.isError && (
               <p className="text-xs text-red-500">{(dedupArticles.error as Error).message}</p>
+            )}
+            {/* 購読リストの入出力もフィードの設定。読む操作ではないので同じ ⚙ の中に畳む */}
+            <div className="flex gap-1">
+              <button
+                onClick={() => opmlFileRef.current?.click()}
+                disabled={importOpml.isPending}
+                className="flex-1 px-1 py-1.5 text-xs whitespace-nowrap text-gray-500 border border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
+              >
+                {importOpml.isPending ? 'Importing...' : 'Import OPML'}
+              </button>
+              <a
+                href={opmlExportUrl}
+                download
+                className="flex-1 px-1 py-1.5 text-xs whitespace-nowrap text-center text-gray-500 border border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
+              >
+                Export OPML
+              </a>
+            </div>
+            {importOpml.isSuccess && (
+              <p className="text-xs text-green-600">
+                Imported {importOpml.data.created} feeds ({importOpml.data.skipped} skipped)
+              </p>
             )}
             {excludeManageMode && (
               <div className="space-y-1">
@@ -521,7 +543,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           </div>
         ))}
 
-        {/* フィードの追加と購読リスト（OPML）の入出力は、フィード一覧の続きに置く */}
+        {/* フィードの追加は一覧の続きに置く（一覧を見た流れで足せるように） */}
         {showAdd ? (
           <form onSubmit={handleAdd} className="px-1 pt-1 space-y-2">
             <input
@@ -559,27 +581,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           >
             + Add Feed
           </button>
-        )}
-        <div className="flex gap-1 px-1">
-          <button
-            onClick={() => opmlFileRef.current?.click()}
-            disabled={importOpml.isPending}
-            className="flex-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded disabled:opacity-50"
-          >
-            {importOpml.isPending ? 'Importing...' : 'Import OPML'}
-          </button>
-          <a
-            href={opmlExportUrl}
-            download
-            className="flex-1 px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded text-center"
-          >
-            Export OPML
-          </a>
-        </div>
-        {importOpml.isSuccess && (
-          <p className="px-2 text-xs text-green-600">
-            Imported {importOpml.data.created} feeds ({importOpml.data.skipped} skipped)
-          </p>
         )}
       </nav>
 
