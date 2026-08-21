@@ -58,11 +58,12 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
         </div>
       </div>
 
-      {/* 各操作の対象件数を出す。実際には仕事が無いのに押せるボタンだと、
-          押して何も起きないのが「壊れている」ように見える */}
+      {/* ラベルは「何に・何をする」の形に揃える。対象が Saved 記事に限られること、
+          既存タグだけを使うのか AI が新しいタグを作るのかが、ラベルだけで分かるように。
+          その下の対象件数は、仕事が無いのに押せるボタンが「壊れている」ように見えるのを防ぐ */}
       <div className="grid gap-2 border-y border-gray-200 py-2 dark:border-gray-700 sm:grid-cols-3">
         <BulkAction
-          label="日本語名を補完"
+          label="タグの日本語名を補完"
           target={bulkStatus && `未翻訳 ${bulkStatus.untranslated_tags} タグ`}
           idle={bulkStatus?.untranslated_tags === 0}
           status={fillTranslations.isPending ? '実行中...' : fillTranslations.isSuccess ? '完了' : null}
@@ -70,7 +71,7 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
           onClick={() => fillTranslations.mutate()}
         />
         <BulkAction
-          label="キーワードで付与"
+          label="Saved に既存タグ付け"
           target={bulkStatus && `対象 ${bulkStatus.keyword_targets} 記事`}
           idle={bulkStatus?.keyword_targets === 0}
           status={
@@ -84,7 +85,7 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
           onClick={() => autoTagSaved.mutate()}
         />
         <BulkAction
-          label="AI でタグを生成"
+          label="Saved に AI タグ付け"
           target={bulkStatus && `対象 ${bulkStatus.ai_targets} 記事`}
           idle={bulkStatus?.ai_targets === 0}
           status={
