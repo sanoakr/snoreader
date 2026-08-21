@@ -6,6 +6,7 @@ import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSave
 import { useExcludePatterns, useCreateExcludePattern, useDeleteExcludePattern } from '../../hooks/useExcludePatterns';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
 import { GenreManagerModal } from './GenreManagerModal';
+import { useSplitSuggestions } from '../../hooks/useSplitSuggestions';
 import type { ArticleFilters } from '../../types';
 
 // 親の未読がこれを超えたらサイドバーで子ジャンルを展開する。
@@ -55,6 +56,8 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const { data: extractFailed } = useExtractFailed();
   const extractFailedCount = extractFailed?.length ?? 0;
   const { data: genreCounts } = useGenreCounts();
+  const { data: splitSuggestions } = useSplitSuggestions();
+  const pendingSplits = splitSuggestions?.length ?? 0;
   // 残件のある種別だけを並べる（3 種すべてを条件式で繋ぐと区切りの制御が破綻するため）
   const aiPendingLabel = [
     aiStatus?.pending_summary ? `要約 ${aiStatus.pending_summary}件` : null,
@@ -295,7 +298,17 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             親の未読が閾値を超えたときだけ子を展開する（超えていなければ従来通り 1 行） */}
         {genreCounts && genreCounts.length > 0 && (
           <div className="mt-4">
-            <div className="px-2 mb-1 text-xs font-semibold text-gray-400">ジャンル</div>
+            <div className="px-2 mb-1 flex items-center gap-1.5 text-xs font-semibold text-gray-400">
+              <span>ジャンル</span>
+              {pendingSplits > 0 && (
+                <span
+                  className="rounded-full bg-amber-500 px-1.5 text-[10px] font-medium text-white"
+                  title={`未読が上限を超えたジャンルの分割提案が ${pendingSplits} 件あります`}
+                >
+                  {pendingSplits}
+                </span>
+              )}
+            </div>
             {genreCounts.map((g) => {
               // 表示中の束が閾値を割った瞬間に選択中の行が消えないよう、
               // その親配下を見ている間は件数に関わらず展開したままにする
@@ -546,10 +559,18 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
             )}
             <button
               onClick={() => setShowGenreManager(m => !m)}
-              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded"
+              className="w-full px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-800 rounded flex items-center justify-center gap-1.5"
               title="どのタグをどのジャンルに割り当てるか、ジャンルの優先順位を編集する"
             >
-              {showGenreManager ? 'ジャンル管理を閉じる' : 'ジャンル管理'}
+              <span>{showGenreManager ? 'ジャンル管理を閉じる' : 'ジャンル管理'}</span>
+              {pendingSplits > 0 && (
+                <span
+                  className="rounded-full bg-amber-500 px-1.5 text-[10px] font-medium text-white"
+                  title={`未読が上限を超えたジャンルの分割提案が ${pendingSplits} 件あります`}
+                >
+                  {pendingSplits}
+                </span>
+              )}
             </button>
             {showGenreManager && (
               <GenreManagerModal
