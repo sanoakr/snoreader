@@ -81,3 +81,48 @@ def test_split_own_tags_children_are_siblings_under_the_same_parent() -> None:
     for child in proposal.children:
         assert child.key.startswith("dev_")
         assert child.key != "dev_prog"
+
+
+def test_split_own_tags_projected_max_ignores_an_unrelated_oversized_genre() -> None:
+    """無関係なジャンルが上限超過でも、対象ジャンルの提案の projected_max は引き上げられない。"""
+    from app.services.genre_split_planner import plan_splits
+
+    # dev_prog は 90 件で分割対象。sports は 500 件で無関係に超過している
+    rules = _rules(
+        {"python": "dev_prog", "rust": "dev_prog", "api": "dev_prog", "soccer": "sports"},
+        priority={"dev": 3, "dev_prog": 3, "sports": 3},
+        parent={"dev_prog": "dev"},
+    )
+    articles = (
+        [(i, ["python"]) for i in range(30)]
+        + [(100 + i, ["rust"]) for i in range(30)]
+        + [(200 + i, ["api"]) for i in range(30)]
+        + [(1000 + i, ["soccer"]) for i in range(500)]
+    )
+
+    proposal = next(
+        p for p in plan_splits(articles, rules, limit=50) if p.genre_key == "dev_prog"
+    )
+    assert proposal.projected_max <= 50
+
+
+def test_split_own_tags_rejects_sibling_key_colliding_with_existing_genre() -> None:
+    """新しい兄弟キーが既存の無関係なジャンルと衝突するなら提案しない。"""
+    from app.services.genre_split_planner import plan_splits
+
+    # rust の受け皿以外の代表タグから作るキーが dev_rust になり、
+    # 既存の（無関係な）ジャンル dev_rust と衝突する
+    rules = _rules(
+        {"python": "dev_prog", "rust": "dev_prog", "api": "dev_prog", "legacycode": "dev_rust"},
+        priority={"dev": 3, "dev_prog": 3, "dev_rust": 1},
+        parent={"dev_prog": "dev", "dev_rust": "dev"},
+    )
+    articles = (
+        [(i, ["python"]) for i in range(30)]
+        + [(100 + i, ["rust"]) for i in range(30)]
+        + [(200 + i, ["api"]) for i in range(30)]
+        + [(300 + i, ["legacycode"]) for i in range(10)]
+    )
+
+    proposals = [p for p in plan_splits(articles, rules, limit=50) if p.genre_key == "dev_prog"]
+    assert proposals == []

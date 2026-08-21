@@ -21,6 +21,8 @@ _MIN_CHILD_ARTICLES = 8
 _MAX_NEW_CHILDREN = 4
 # 貪欲詰めの 1 ビンあたり上限（limit のこの割合まで）。分割直後に再超過しないための余裕
 _BIN_FILL_RATIO = 0.8
+# 新しい兄弟ジャンルに割り当てる priority のデフォルト値（親に priority が無い場合の保険）
+_DEFAULT_NEW_GENRE_PRIORITY = 100
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class ProposedChild:
     key: str
     label_ja: str
     tags: tuple[str, ...]
+    # 推定値ではない: candidate ルールで classify を実際に再実行して測定した件数
     estimated_unread: int
 
 
@@ -89,6 +92,18 @@ def _simulate(
     return Counter(classify(tags, candidate) for _aid, tags in articles)
 
 
+def _affected_max(current: Counter[str], projected: Counter[str], genre_key: str) -> int:
+    """この案が影響するバケットの最大件数。
+
+    corpus 全体の最大値ではない。無関係なジャンルが上限を超えているだけで
+    正しい案が棄却されるのを防ぐ。「譲られた側が溢れないこと」を見るために、
+    件数が変化したジャンル（受け取った側・失った側の両方）と対象ジャンル自身だけを見る。
+    """
+    changed = {k for k in set(current) | set(projected) if current[k] != projected[k]}
+    changed.add(genre_key)
+    return max((projected[k] for k in changed), default=0)
+
+
 def _own_tags(genre_key: str, rules: GenreRules) -> list[str]:
     return [t for t, g in rules.tag_to_genre.items() if g == genre_key]
 
@@ -107,7 +122,8 @@ def _plan_split_own_tags(
     limit: int,
 ) -> SplitProposal | None:
     """担当タグを件数降順に貪欲に詰め、最多タグは元ジャンルに残す。"""
-    before = _current_counts(articles, rules)[genre_key]
+    current = _current_counts(articles, rules)
+    before = current[genre_key]
     own = _own_tags(genre_key, rules)
     if len(own) < 2:
         return None
@@ -132,17 +148,23 @@ def _plan_split_own_tags(
                 break
         else:
             if len(bins) >= _MAX_NEW_CHILDREN:
-                break
+                # 子の上限に達しても、この後の（より小さい）タグは既存ビンの
+                # 残り容量に収まる可能性がある。ここで打ち切ると取りこぼす
+                continue
             bins.append([tag])
     if not bins:
         return None
 
     tag_moves: dict[str, str] = {}
     keys: list[str] = []
+    seen_keys: set[str] = set()
     for b in bins:
         key = _sibling_key(parent_key, b[0])
-        if key == genre_key:
-            return None  # 受け皿と衝突するキーは作れない
+        # 受け皿と衝突、既存の無関係なジャンルと衝突、この提案内での重複は
+        # いずれも作れない（既存ジャンルとの衝突は誤って統合・上書きするデータ破損になる）
+        if key == genre_key or key in rules.priority or key in seen_keys:
+            return None
+        seen_keys.add(key)
         keys.append(key)
         for tag in b:
             tag_moves[tag] = key
@@ -152,7 +174,9 @@ def _plan_split_own_tags(
         rules,
         tag_moves=tag_moves,
         demote=set(),
-        new_priorities={k: rules.priority.get(parent_key, 100) for k in keys},
+        new_priorities={
+            k: rules.priority.get(parent_key, _DEFAULT_NEW_GENRE_PRIORITY) for k in keys
+        },
         new_parents={k: parent_key for k in keys},
     )
     children = tuple(
@@ -170,7 +194,7 @@ def _plan_split_own_tags(
         genre_key=genre_key,
         strategy="split_own_tags",
         before=before,
-        projected_max=max(projected.values()),
+        projected_max=_affected_max(current, projected, genre_key),
         children=children,
     )
 
