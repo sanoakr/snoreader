@@ -23,6 +23,8 @@ _MAX_NEW_CHILDREN = 4
 _BIN_FILL_RATIO = 0.8
 # 新しい兄弟ジャンルに割り当てる priority のデフォルト値（親に priority が無い場合の保険）
 _DEFAULT_NEW_GENRE_PRIORITY = 100
+# そのジャンルの未読の何割以上に出現するタグを「受け皿」とみなすか
+_DEMOTE_COVERAGE = 0.8
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,48 @@ def _plan_split_own_tags(
     )
 
 
+def _plan_demote_generic(
+    genre_key: str,
+    articles: list[tuple[int, list[str]]],
+    rules: GenreRules,
+    *,
+    limit: int,
+) -> SplitProposal | None:
+    """受け皿タグを is_generic に降格し、通常ルールを持つ他ジャンルに譲る。
+
+    ジャンルを 1 つも増やさずに済むので最優先で試す。ただし
+    「AI＋セキュリティの記事は security へ行く」という意味の変更を伴うため、
+    採用するかどうかはユーザーが決める（案として並べるだけ）。
+    """
+    current = _current_counts(articles, rules)
+    before = current[genre_key]
+    mine = [(aid, tags) for aid, tags in articles if classify(tags, rules) == genre_key]
+    if not mine:
+        return None
+    own = set(_own_tags(genre_key, rules))
+    if not own:
+        return None
+
+    threshold = len(mine) * _DEMOTE_COVERAGE
+    counts = Counter(t for _aid, tags in mine for t in tags if t in own)
+    receptacle = tuple(sorted(t for t, c in counts.items() if c >= threshold))
+    if not receptacle:
+        return None
+
+    projected = _simulate(articles, rules, tag_moves={}, demote=set(receptacle))
+    projected_max = _affected_max(current, projected, genre_key)
+    if projected[genre_key] > limit or projected_max > limit:
+        return None
+    return SplitProposal(
+        genre_key=genre_key,
+        strategy="demote_generic",
+        before=before,
+        projected_max=projected_max,
+        children=(),
+        demote_tags=receptacle,
+    )
+
+
 def plan_splits(
     articles: list[tuple[int, list[str]]],
     rules: GenreRules,
@@ -216,8 +260,9 @@ def plan_splits(
 
     proposals: list[SplitProposal] = []
     for genre_key in over:
-        found = _plan_split_own_tags(genre_key, articles, rules, limit=limit)
-        if found:
-            proposals.append(found)
+        for planner in (_plan_demote_generic, _plan_split_own_tags):
+            found = planner(genre_key, articles, rules, limit=limit)
+            if found:
+                proposals.append(found)
     proposals.sort(key=lambda p: (p.projected_max, p.genre_key, p.strategy))
     return proposals

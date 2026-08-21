@@ -126,3 +126,33 @@ def test_split_own_tags_rejects_sibling_key_colliding_with_existing_genre() -> N
 
     proposals = [p for p in plan_splits(articles, rules, limit=50) if p.genre_key == "dev_prog"]
     assert proposals == []
+
+
+def test_demote_generic_shrinks_a_receptacle_genre_without_adding_children() -> None:
+    """担当タグが 1 つの受け皿が超過したら、そのタグを汎用に降格して他ジャンルに譲る。
+
+    実データの ai_misc（担当タグは ai だけ、53 件）を縮めた再現。ai の priority が
+    最小なので、ai + security の記事も ai_misc に落ちてしまっている。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"ai": "ai_misc", "llm": "ai_llm", "security": "security", "python": "dev"},
+        priority={"ai": 1, "ai_misc": 1, "ai_llm": 1, "security": 2, "dev": 3},
+        parent={"ai_misc": "ai", "ai_llm": "ai"},
+    )
+    # ai だけの記事 20 件 + ai と他ジャンルタグを併せ持つ記事 40 件 = ai_misc に 60 件
+    articles = (
+        [(i, ["ai"]) for i in range(20)]
+        + [(100 + i, ["ai", "security"]) for i in range(20)]
+        + [(200 + i, ["ai", "python"]) for i in range(20)]
+    )
+
+    proposals = [p for p in plan_splits(articles, rules, limit=50) if p.strategy == "demote_generic"]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.genre_key == "ai_misc"
+    assert proposal.before == 60
+    assert proposal.demote_tags == ("ai",)
+    assert proposal.children == ()          # ジャンルを増やさない手
+    assert proposal.projected_max <= 50
