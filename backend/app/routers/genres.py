@@ -10,15 +10,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models import Genre, GenreRule
+from app.models import Genre, GenreRule, GenreSplitSuggestion
 from app.schemas import (
+    ApplySuggestionBody,
+    ApplySuggestionResult,
     GenreCreate,
     GenreOut,
     GenreRuleCreate,
     GenreRuleOut,
     GenreUpdate,
+    ProposedChildOut,
     ReclassifyResult,
     SeedSubgenresResult,
+    SplitSuggestionOut,
 )
 
 router = APIRouter(tags=["genres"])
@@ -134,6 +138,103 @@ async def create_genre(body: GenreCreate, session: AsyncSession = Depends(get_se
         parent_id=genre.parent_id,
         reclassified=changed,
     )
+
+
+# --- 分割提案（split-suggestions）---
+#
+# パス変数を持つ `/genres/{genre_id}` より前に置く。そうしないと FastAPI が
+# "split-suggestions" を genre_id として解釈しようとして 422 になる。
+
+
+@router.get("/genres/split-suggestions", response_model=list[SplitSuggestionOut])
+async def list_split_suggestions(session: AsyncSession = Depends(get_session)):
+    """保留中（未適用・未無視）の分割提案を projected_max 昇順で返す。"""
+    from app.services.genre_split_store import payload_to_proposal
+
+    rows = (
+        await session.execute(
+            select(GenreSplitSuggestion)
+            .where(GenreSplitSuggestion.dismissed_at.is_(None))
+            .order_by(GenreSplitSuggestion.projected_max.asc(), GenreSplitSuggestion.id.asc())
+        )
+    ).scalars().all()
+
+    out: list[SplitSuggestionOut] = []
+    for row in rows:
+        proposal = payload_to_proposal(row.payload)
+        out.append(
+            SplitSuggestionOut(
+                id=row.id,
+                genre_key=row.genre_key,
+                strategy=row.strategy,
+                before=row.before_count,
+                projected_max=row.projected_max,
+                children=[
+                    ProposedChildOut(
+                        key=c.key,
+                        label_ja=c.label_ja,
+                        tags=list(c.tags),
+                        estimated_unread=c.estimated_unread,
+                    )
+                    for c in proposal.children
+                ],
+                demote_tags=list(proposal.demote_tags),
+                created_at=row.created_at,
+            )
+        )
+    return out
+
+
+@router.post("/genres/split-suggestions/refresh", response_model=dict)
+async def refresh_split_suggestions_endpoint(session: AsyncSession = Depends(get_session)):
+    """手動で再計算する。通常はフィード取得サイクルの末尾で走る。"""
+    from app.services.genre_split_store import refresh_split_suggestions
+
+    created = await refresh_split_suggestions(session)
+    await session.commit()
+    return {"created": created}
+
+
+@router.post(
+    "/genres/split-suggestions/{suggestion_id}/apply", response_model=ApplySuggestionResult
+)
+async def apply_split_suggestion(
+    suggestion_id: int,
+    body: ApplySuggestionBody,
+    session: AsyncSession = Depends(get_session),
+):
+    """提案を適用する。子作成 / ルール移動 / 汎用降格 → 全件再分類（実測 47 秒）。
+
+    提案が無い（LookupError）は 404、辞書が変わって提案が古くなっている
+    （ValueError、子キーが別の親を持つジャンルと衝突）は 409。
+    """
+    from app.services.genre_split_store import apply_suggestion
+
+    try:
+        created, moved, reclassified = await apply_suggestion(
+            session, suggestion_id, labels=body.labels
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return ApplySuggestionResult(created=created, moved=moved, reclassified=reclassified)
+
+
+@router.post("/genres/split-suggestions/{suggestion_id}/dismiss", response_model=dict)
+async def dismiss_split_suggestion(
+    suggestion_id: int, session: AsyncSession = Depends(get_session)
+):
+    """その提案と同ジャンルの保留を閉じる。未読がこの時点より増えるまで再提案しない。"""
+    from app.services.genre_split_store import dismiss_suggestion
+
+    try:
+        dismissed = await dismiss_suggestion(session, suggestion_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return {"dismissed": dismissed}
 
 
 @router.patch("/genres/{genre_id}", response_model=GenreOut)
