@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
+import { ModalShell } from '../common/ModalShell';
 import {
   useGenres,
   useCreateGenre,
@@ -26,8 +26,7 @@ interface Props {
 }
 
 // ジャンル辞書（タグ→ジャンルの割り当て、優先順位）を編集するモーダル。
-// サイドバー幅 256px にインラインで開くと横も縦も溢れるため、body 直下のオーバーレイとして描く
-// （サイドバーの外側が transition-transform を持つので、portal を使わないと fixed の基準がずれる）。
+// オーバーレイの枠組み（portal / Escape / 背景クリック）は ModalShell に持たせている。
 export function GenreManagerModal({ onNavigateToOther, onClose, filters, onFilterChange }: Props) {
   const { data: genres } = useGenres();
   const createGenre = useCreateGenre();
@@ -44,21 +43,6 @@ export function GenreManagerModal({ onNavigateToOther, onClose, filters, onFilte
   const [newGenreKey, setNewGenreKey] = useState('');
   const [newGenreLabel, setNewGenreLabel] = useState('');
   const [newGenreParentId, setNewGenreParentId] = useState<number | null>(null);
-
-  // 開いている間は Escape で閉じ、ArticleList / ArticleReader の window ショートカット
-  // （j/k/s/矢印/Space）を止める。あちらのガードは INPUT / TEXTAREA しか除外しないので、
-  // 「モーダルが開いている」ことを body の data 属性で共有する
-  useEffect(() => {
-    document.body.dataset.modalOpen = 'true';
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      delete document.body.dataset.modalOpen;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose]);
 
   // タグ追加フォームの <select> は空の選択肢を持たないため、ユーザーがまだ選択していない間は
   // 先頭のジャンルを既定値として使う（state 自体は未選択のまま保つ。setState-in-effect を避けるため）。
@@ -179,25 +163,10 @@ export function GenreManagerModal({ onNavigateToOther, onClose, filters, onFilte
     </div>
   );
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/40 p-3 sm:p-6"
-      // 背景そのものを押したときだけ閉じる（パネル内でのドラッグ終了で閉じないよう target を見る）
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-900 sm:max-h-[calc(100vh-3rem)]">
-        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-700">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">ジャンル管理</h2>
-          <button
-            onClick={onClose}
-            title="閉じる"
-            className="flex h-6 w-6 items-center justify-center rounded text-base leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="space-y-1 overflow-y-auto px-4 py-3">
-          <SplitSuggestionPanel />
+  return (
+    <ModalShell title="ジャンル管理" onClose={onClose}>
+      <div className="space-y-1">
+        <SplitSuggestionPanel />
       {tree.map(({ parent, children }) => (
         <div key={parent.id}>
           {renderGenre(parent, false)}
@@ -330,9 +299,7 @@ export function GenreManagerModal({ onNavigateToOther, onClose, filters, onFilte
           {seedSubgenres.isPending ? '投入中...' : '推奨サブジャンルを投入'}
         </button>
         </div>
-        </div>
       </div>
-    </div>,
-    document.body,
+    </ModalShell>
   );
 }

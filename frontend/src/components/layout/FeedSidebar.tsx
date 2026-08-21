@@ -2,10 +2,11 @@ import { useRef, useState } from 'react';
 import { Spinner } from '../common/Spinner';
 import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, useImportArticles, useDedupArticles } from '../../hooks/useFeeds';
 import { useRecommendedCount, useSavedCount, useAiStatus, useExtractFailed, useGenreCounts } from '../../hooks/useArticles';
-import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
+import { useTags } from '../../hooks/useTags';
 import { useExcludePatterns, useCreateExcludePattern, useDeleteExcludePattern } from '../../hooks/useExcludePatterns';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
 import { GenreManagerModal } from './GenreManagerModal';
+import { TagManagerModal } from './TagManagerModal';
 import { useSplitSuggestions } from '../../hooks/useSplitSuggestions';
 import type { ArticleFilters } from '../../types';
 
@@ -30,19 +31,12 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const importOpml = useImportOpml();
   const importArticles = useImportArticles();
   const dedupArticles = useDedupArticles();
-  const renameTag = useRenameTag();
-  const bulkDeleteTags = useBulkDeleteTags();
-  const aiTagSaved = useAiTagSaved();
-  const autoTagSaved = useAutoTagSaved();
-  const fillTranslations = useFillTagTranslations();
   const { data: excludePatterns } = useExcludePatterns();
   const createExcludePattern = useCreateExcludePattern();
   const deleteExcludePattern = useDeleteExcludePattern();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
-  const [tagManageMode, setTagManageMode] = useState(false);
-  const [editingTagId, setEditingTagId] = useState<number | null>(null);
-  const [editingTagName, setEditingTagName] = useState('');
+  const [showTagManager, setShowTagManager] = useState(false);
   const [excludeManageMode, setExcludeManageMode] = useState(false);
   const [newExcludePattern, setNewExcludePattern] = useState('');
   const [showGenreManager, setShowGenreManager] = useState(false);
@@ -123,22 +117,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
     });
   };
 
-  const handleRenameSubmit = (tagId: number) => {
-    const newName = editingTagName.trim();
-    if (!newName) { setEditingTagId(null); return; }
-    const lower = newName.toLowerCase();
-    const existing = tags?.find(t =>
-      t.id !== tagId && (
-        t.name.toLowerCase() === lower ||
-        (t.name_ja && t.name_ja === newName)
-      )
-    );
-    if (existing && !confirm(`Tag "#${existing.name}" already exists — merge into it?`)) return;
-    renameTag.mutate({ id: tagId, name: newName }, {
-      onSuccess: () => setEditingTagId(null),
-    });
-  };
-
   return (
     <aside className="w-64 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 h-screen overflow-y-auto flex flex-col">
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -216,8 +194,8 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
           <p className="px-2 text-xs text-red-500">{(importArticles.error as Error).message}</p>
         )}
 
-        {/* Tag management section — filter chips live in the Saved view now.
-            Keep rename/delete and batch ops (JA補完 / AI tag) accessible here via ⚙. */}
+        {/* タグの絞り込みチップは Saved ビュー側にあるので、ここは表示言語の切り替えと
+            管理モーダルへの入口だけを持つ */}
         {tags && tags.length > 0 && (
           <>
             <hr className="my-2 border-gray-200 dark:border-gray-700" />
@@ -234,83 +212,12 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
               <IconButton
                 label="⚙"
                 title="タグ管理（名前の変更・削除・一括タグ付け）"
-                active={tagManageMode}
-                onClick={() => { setTagManageMode(m => !m); setEditingTagId(null); }}
+                active={showTagManager}
+                onClick={() => setShowTagManager(m => !m)}
               />
             </SectionHeading>
-            {tagManageMode && (
-              <div className="flex items-center gap-2 px-3 pt-1 whitespace-nowrap">
-                <button
-                  onClick={() => fillTranslations.mutate()}
-                  disabled={fillTranslations.isPending}
-                  className="text-xs text-blue-400 hover:text-blue-600 disabled:opacity-50"
-                  title="Translate English tags to Japanese"
-                >
-                  {fillTranslations.isPending ? 'Translating...' : fillTranslations.isSuccess ? 'Done' : 'JA補完'}
-                </button>
-                <button
-                  onClick={() => autoTagSaved.mutate()}
-                  disabled={autoTagSaved.isPending}
-                  className="text-xs text-green-400 hover:text-green-600 disabled:opacity-50"
-                  title="Auto-tag untagged Saved articles via existing-tag keyword match"
-                >
-                  {autoTagSaved.isPending ? 'Matching...' : autoTagSaved.isSuccess ? `+${autoTagSaved.data.attached} on ${autoTagSaved.data.processed}` : 'Auto tag'}
-                </button>
-                <button
-                  onClick={() => aiTagSaved.mutate()}
-                  disabled={aiTagSaved.isPending}
-                  className="text-xs text-purple-400 hover:text-purple-600 disabled:opacity-50"
-                  title="AI tag Saved articles (10 at a time)"
-                >
-                  {aiTagSaved.isPending ? 'AI...' : aiTagSaved.isSuccess ? `+${aiTagSaved.data.queued} (${aiTagSaved.data.remaining} left)` : 'AI tag'}
-                </button>
-              </div>
-            )}
-
-            {tagManageMode && (
-              <div className="px-3 pb-1 space-y-0.5">
-                {tags.map((tag) => (
-                  <div key={tag.id} className="flex items-center gap-1 group">
-                    {editingTagId === tag.id ? (
-                      <form
-                        className="flex-1 flex gap-1"
-                        onSubmit={(e) => { e.preventDefault(); handleRenameSubmit(tag.id); }}
-                      >
-                        <input
-                          type="text"
-                          value={editingTagName}
-                          onChange={(e) => setEditingTagName(e.target.value)}
-                          className="flex-1 px-1.5 py-0.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-600"
-                          autoFocus
-                          onKeyDown={(e) => { if (e.key === 'Escape') setEditingTagId(null); }}
-                        />
-                        <button type="submit" className="text-xs text-blue-500 hover:text-blue-700">✓</button>
-                        <button type="button" onClick={() => setEditingTagId(null)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
-                      </form>
-                    ) : (
-                      <>
-                        <span className="flex-1 text-xs text-gray-600 dark:text-gray-400 truncate">
-                        #{tagLang === 'ja' && tag.name_ja ? tag.name_ja : tag.name}
-                      </span>
-                        <button
-                          onClick={() => { setEditingTagId(tag.id); setEditingTagName(tag.name); }}
-                          className="text-gray-400 hover:text-blue-500 text-sm px-1 leading-none"
-                          title="Rename"
-                        >
-                          ✏
-                        </button>
-                        <button
-                          onClick={() => { if (confirm(`Delete tag "${tag.name}"?`)) bulkDeleteTags.mutate([tag.id]); }}
-                          className="text-gray-400 hover:text-red-500 text-sm px-1 leading-none"
-                          title="Delete"
-                        >
-                          ×
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
+            {showTagManager && (
+              <TagManagerModal tagLang={tagLang} onClose={() => setShowTagManager(false)} />
             )}
           </>
         )}
