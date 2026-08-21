@@ -130,3 +130,22 @@ export interface ChatSuggestionsResponse {
   /** この応答が LLM 生成によるものか（キャッシュ返却なら false） */
   generated: boolean;
 }
+
+export interface ProposedChild {
+  key: string;
+  label_ja: string;
+  tags: string[];
+  estimated_unread: number;
+}
+
+// 未読が上限を超えた葉ジャンルの分割案。件数はバックエンドで実際に分類し直した実測値
+export interface SplitSuggestion {
+  id: number;
+  genre_key: string;
+  strategy: string;
+  before: number;
+  projected_max: number;
+  children: ProposedChild[];
+  demote_tags: string[];
+  created_at: string;
+}
