@@ -217,6 +217,82 @@ def test_demote_generic_shrinks_a_receptacle_genre_without_adding_children() -> 
     assert proposal.projected_max <= 50
 
 
+def test_demote_generic_accepts_a_fix_that_pushes_a_near_full_genre_over() -> None:
+    """「影響先が全員 limit 以下」ではなく「影響先の最大値が厳密に改善する」を採用条件にする。
+
+    本番データの再現: ai_misc は ai タグだけの受け皿で 54 件、上限 50 を超過。
+    ai を降格すれば 49 件まで下がる劇的な改善だが、ai+security の 5 件は
+    security へ再配分される。security はすでに（無関係な記事で）46 件と
+    上限のすぐ下にいたので、46 → 51 でちょうど超過してしまう。
+
+    旧ガード（影響先が全員 limit 以下）はこの 1 件の超過だけを理由に、
+    54 件という明白な超過を 49 件まで縮める改善案を丸ごと棄却していた
+    （相対的に旧コードでこのテストを実行すると FAIL する — 別途ミューテーション
+    テストで確認済み）。新ガードは「影響先の最大値が適用前より厳密に減って
+    いるか」だけを見る: 適用前の最大値は max(ai_misc=54, security=46)=54、
+    適用後は max(ai_misc=49, security=51)=51。51 < 54 なので改善と認め、
+    案を採用する。新たに超過した security 自身は次サイクルで自分の提案対象
+    になる——それがこの機能の意図する反復的な挙動。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"ai": "ai_misc", "security": "security"},
+        priority={"ai_misc": 1, "security": 5},
+    )
+    articles = (
+        [(i, ["ai"]) for i in range(49)]
+        + [(100 + i, ["ai", "security"]) for i in range(5)]
+        + [(200 + i, ["security"]) for i in range(46)]
+    )
+
+    proposals = [
+        p
+        for p in plan_splits(articles, rules, limit=50)
+        if p.genre_key == "ai_misc" and p.strategy == "demote_generic"
+    ]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal.before == 54
+    assert proposal.demote_tags == ("ai",)
+    assert proposal.projected_max == 51  # limit(50) を超えるが、54 からは厳密に改善している
+
+
+def test_demote_generic_still_rejects_a_fix_that_makes_the_worst_case_worse() -> None:
+    """影響先の最大値が改善しない（悪化する）案は、新ガードでも棄却される。
+
+    上のテストとの違いは受け皿（security）の規模だけ: ここでは security が
+    無関係な記事だけで既に 60 件（ai_misc の適用前 55 件より大きい）を抱えて
+    いる。ai を降格すると ai+security の 50 件がそこに合流し、security は
+    60 → 110 に跳ね上がる。適用前の影響先最大値は max(ai_misc=55,
+    security=60)=60、適用後は max(ai_misc=5, security=110)=110。110 は 60
+    より大きい——最大値は改善どころか悪化している——ので、ai_misc 自体は
+    5 件まで下がるにもかかわらず、案全体が棄却されなければならない。
+
+    このテストは新ガードを完全に外すと FAIL する（別途ミューテーションテスト
+    で確認済み）: ガードが無いと projected[genre_key] <= limit だけを見て
+    この悪化案を採用してしまう。
+    """
+    from app.services.genre_split_planner import plan_splits
+
+    rules = _rules(
+        {"ai": "ai_misc", "security": "security"},
+        priority={"ai_misc": 1, "security": 5},
+    )
+    articles = (
+        [(i, ["ai"]) for i in range(5)]
+        + [(100 + i, ["ai", "security"]) for i in range(50)]
+        + [(200 + i, ["security"]) for i in range(60)]
+    )
+
+    proposals = [
+        p
+        for p in plan_splits(articles, rules, limit=50)
+        if p.genre_key == "ai_misc" and p.strategy == "demote_generic"
+    ]
+    assert proposals == []
+
+
 def test_promote_free_tags_creates_siblings_from_unruled_cooccurring_tags() -> None:
     """未ルールの共起タグを新しい兄弟の担当タグにする。"""
     from app.services.genre_split_planner import plan_splits

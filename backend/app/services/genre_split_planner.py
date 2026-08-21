@@ -105,16 +105,22 @@ def _simulate(
     return Counter(classify(tags, candidate) for _aid, tags in articles)
 
 
-def _affected_max(current: Counter[str], projected: Counter[str], genre_key: str) -> int:
-    """この案が影響するバケットの最大件数。
+def _affected_keys(current: Counter[str], projected: Counter[str], genre_key: str) -> set[str]:
+    """この案が影響するバケットのキー集合。
 
-    corpus 全体の最大値ではない。無関係なジャンルが上限を超えているだけで
-    正しい案が棄却されるのを防ぐ。「譲られた側が溢れないこと」を見るために、
-    件数が変化したジャンル（受け取った側・失った側の両方）と対象ジャンル自身だけを見る。
+    corpus 全体ではない。無関係なジャンルが上限を超えているだけで正しい案が
+    棄却されるのを防ぐため、件数が変化したジャンル（受け取った側・失った側の
+    両方）と対象ジャンル自身だけに絞る。_affected_max（適用後の最大値）と
+    _plan_demote_generic（適用前の最大値との比較）の両方がこの同じ集合を使う。
     """
     changed = {k for k in set(current) | set(projected) if current[k] != projected[k]}
     changed.add(genre_key)
-    return max((projected[k] for k in changed), default=0)
+    return changed
+
+
+def _affected_max(current: Counter[str], projected: Counter[str], genre_key: str) -> int:
+    """この案が影響するバケットの、適用後の最大件数。"""
+    return max((projected[k] for k in _affected_keys(current, projected, genre_key)), default=0)
 
 
 def _own_tags(genre_key: str, rules: GenreRules) -> list[str]:
@@ -224,6 +230,18 @@ def _plan_demote_generic(
     ジャンルを 1 つも増やさずに済むので最優先で試す。ただし
     「AI＋セキュリティの記事は security へ行く」という意味の変更を伴うため、
     採用するかどうかはユーザーが決める（案として並べるだけ）。
+
+    採用条件は「対象ジャンルが limit 以下になる」かつ「影響先バケットの
+    最大値が（適用前と比べて）厳密に改善する」——「影響先が全員 limit 以下」
+    ではない。後者は本番データで実際に満たせなかった: ai_misc（54 件）は
+    ai タグを降格すれば 19 件まで下がる劇的な改善だが、その記事は他の
+    11 ジャンルに再配分され、politics が 46 → 51 でちょうど超過する。する
+    と「全員 limit 以下」を要求する旧ガードは、この 54 → 19 という明白な
+    改善案まで丸ごと棄却してしまい、何も提案されなくなっていた。
+    「影響先最大値が厳密に減っている」であれば「一つ潰して一つ増やす」だけ
+    の悪化は防げるし、新たに超過した politics 自身は次サイクルで自分の
+    提案対象になる——これはこの機能が意図する反復的な挙動そのもの。人間が
+    1 件ずつ承認するので、往復のような振動が起きても人が止める余地がある。
     """
     current = _current_counts(articles, rules)
     before = current[genre_key]
@@ -241,8 +259,12 @@ def _plan_demote_generic(
         return None
 
     projected = _simulate(articles, rules, tag_moves={}, demote=set(receptacle))
+    if projected[genre_key] > limit:
+        return None
+    affected = _affected_keys(current, projected, genre_key)
+    before_max = max((current[k] for k in affected), default=0)
     projected_max = _affected_max(current, projected, genre_key)
-    if projected[genre_key] > limit or projected_max > limit:
+    if projected_max >= before_max:
         return None
     return SplitProposal(
         genre_key=genre_key,
