@@ -8,6 +8,14 @@ export function useTags() {
   });
 }
 
+// タグ管理モーダルの一括操作ボタンに出す対象件数
+export function useTagBulkStatus() {
+  return useQuery({
+    queryKey: ['tag-bulk-status'],
+    queryFn: api.getTagBulkStatus,
+  });
+}
+
 export function useAddTag() {
   const qc = useQueryClient();
   return useMutation({
@@ -61,6 +69,7 @@ export function useAiTagSaved() {
   return useMutation({
     mutationFn: api.aiTagSaved,
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tag-bulk-status'] });
       qc.invalidateQueries({ queryKey: ['tags'] });
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['article'] });
@@ -73,6 +82,7 @@ export function useAutoTagSaved() {
   return useMutation({
     mutationFn: api.autoTagSaved,
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tag-bulk-status'] });
       qc.invalidateQueries({ queryKey: ['tags'] });
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['article'] });
@@ -86,7 +96,10 @@ export function useFillTagTranslations() {
     mutationFn: api.fillTagTranslations,
     onSuccess: () => {
       // Translation runs in background; refresh cache after 2 seconds
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['tags'] }), 2000);
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['tags'] });
+        qc.invalidateQueries({ queryKey: ['tag-bulk-status'] });
+      }, 2000);
     },
   });
 }

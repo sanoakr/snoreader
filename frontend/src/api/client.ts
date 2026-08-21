@@ -271,6 +271,17 @@ export function getAiStatus(): Promise<AiStatus> {
   return fetchJSON(`${BASE}/ai/status`);
 }
 
+export interface TagBulkStatus {
+  untranslated_tags: number;
+  keyword_targets: number;
+  ai_targets: number;
+}
+
+// タグ管理モーダルの一括操作 3 つの対象件数（押す前に仕事があるか出すため）
+export function getTagBulkStatus(): Promise<TagBulkStatus> {
+  return fetchJSON(`${BASE}/tags/bulk-status`);
+}
+
 export function aiTagSaved(): Promise<{ queued: number; remaining: number }> {
   return fetchJSON(`${BASE}/articles/ai-tag-saved`, { method: 'POST' });
 }
