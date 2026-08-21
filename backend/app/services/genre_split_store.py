@@ -195,8 +195,15 @@ async def apply_suggestion(
     - 最後に reclassify_all を 1 回だけ呼ぶ（本番で ~47 秒かかるので、この経路だけに限る）
     - 辞書が変わった後は projected_max が無効になるので、同じ genre_key の
       保留中の他の案（この提案自身も含む）を全部閉じる
+
+    提案の保存後、DB がスナップショットと食い違っていることがある
+    （対象ジャンルが消えた、または子キーと同名の別ジャンルが独立に作られた）。
+    そういう食い違いは検証フェーズで洗い出し、何も変更する前に例外を投げる。
+    「見つからない」（LookupError）と「見つかったが古いスナップショットと
+    矛盾する」（ValueError）は呼び出し側が別々に扱えるよう区別する。
     """
     from app.services.genre_classifier import OTHER_GENRE, reclassify_all
+    from app.services.genre_split_planner import DEFAULT_NEW_GENRE_PRIORITY
 
     row = await session.get(GenreSplitSuggestion, suggestion_id)
     if row is None:
@@ -204,6 +211,38 @@ async def apply_suggestion(
     proposal = payload_to_proposal(row.payload)
     overrides = labels or {}
 
+    # --- 検証フェーズ: まだ何も変更していない。ここで例外を投げれば
+    # 部分適用（デモート済みなのに子は作られていない、等）を残さない ---
+    is_other = proposal.genre_key == OTHER_GENRE
+    parent_id: int | None = None
+    priority = DEFAULT_NEW_GENRE_PRIORITY
+    if proposal.children and not is_other:
+        target = (
+            await session.execute(select(Genre).where(Genre.key == proposal.genre_key))
+        ).scalar_one_or_none()
+        if target is None:
+            raise LookupError("Genre no longer exists")
+        # target が子なら新しい子は兄弟（同じ親）に、target が子を持たない
+        # トップレベルなら target 自身の子にする。階層は 2 段のまま
+        parent_id = target.parent_id if target.parent_id is not None else target.id
+        parent = await session.get(Genre, parent_id)
+        priority = parent.priority if parent is not None else target.priority
+
+    for child in proposal.children:
+        existing_genre = (
+            await session.execute(select(Genre).where(Genre.key == child.key))
+        ).scalar_one_or_none()
+        if existing_genre is not None and existing_genre.parent_id != parent_id:
+            # この key を持つジャンルは既にあるが、意図した親と食い違う。
+            # 提案の保存後に利用者が独立にそのキーのジャンルを作った/動かした
+            # ということなので、黙って書き換えて乗っ取ると利用者のジャンルが
+            # 気付かれずに別物になる。何も変更せず失敗させ、再提案を促す
+            raise ValueError(
+                f"Genre '{child.key}' already exists with a different parent; "
+                "the proposal is stale — refresh split suggestions and retry"
+            )
+
+    # --- ここから変更フェーズ ---
     created = 0
     moved = 0
 
@@ -217,51 +256,44 @@ async def apply_suggestion(
             moved += 1
 
     # 新しい子（other 由来なら新トップレベル）を作り、タグを付け替える
-    if proposal.children:
-        is_other = proposal.genre_key == OTHER_GENRE
-        parent_id: int | None = None
-        priority = 100
-        if not is_other:
-            target = (
-                await session.execute(select(Genre).where(Genre.key == proposal.genre_key))
-            ).scalar_one_or_none()
-            if target is None:
-                raise LookupError("Genre no longer exists")
-            # target が子なら新しい子は兄弟（同じ親）に、target が子を持たない
-            # トップレベルなら target 自身の子にする。階層は 2 段のまま
-            parent_id = target.parent_id if target.parent_id is not None else target.id
-            parent = await session.get(Genre, parent_id)
-            priority = parent.priority if parent is not None else target.priority
+    for child in proposal.children:
+        genre = (
+            await session.execute(select(Genre).where(Genre.key == child.key))
+        ).scalar_one_or_none()
+        label = overrides.get(child.key, child.label_ja)
+        if genre is None:
+            genre = Genre(
+                key=child.key,
+                label_ja=label,
+                priority=priority,
+                parent_id=parent_id,
+            )
+            session.add(genre)
+            await session.flush()
+            created += 1
+        else:
+            genre.label_ja = label
 
-        for child in proposal.children:
-            genre = (
-                await session.execute(select(Genre).where(Genre.key == child.key))
+        for tag in child.tags:
+            rule = (
+                await session.execute(select(GenreRule).where(GenreRule.tag == tag))
             ).scalar_one_or_none()
-            label = overrides.get(child.key, child.label_ja)
-            if genre is None:
-                genre = Genre(
-                    key=child.key,
-                    label_ja=label,
-                    priority=priority,
-                    parent_id=parent_id,
-                )
-                session.add(genre)
-                await session.flush()
-                created += 1
-            else:
-                genre.label_ja = label
-
-            for tag in child.tags:
-                rule = (
-                    await session.execute(select(GenreRule).where(GenreRule.tag == tag))
-                ).scalar_one_or_none()
-                if rule is None:
-                    # 既存 POST /genre-rules と同じ「衝突ではなく付け替え」の作法
-                    session.add(GenreRule(tag=tag, genre_id=genre.id, is_generic=False))
-                    moved += 1
-                elif rule.genre_id != genre.id:
-                    rule.genre_id = genre.id
-                    moved += 1
+            if rule is None:
+                # 既存 POST /genre-rules と同じ「衝突ではなく付け替え」の作法
+                session.add(GenreRule(tag=tag, genre_id=genre.id, is_generic=False))
+                moved += 1
+            elif rule.genre_id != genre.id:
+                rule.genre_id = genre.id
+                # _simulate の tag_moves は移動先タグを常に tag_to_genre
+                # （通常段）に置いて件数を測っているので、既存ルールが
+                # is_generic=True のまま付け替わると通常段より優先度の低い
+                # 汎用段に落ちてしまい、reclassify_all の結果が利用者が
+                # 承認した件数と食い違う。既存の genre_seed.seed_subgenres は
+                # タグを子へ移すときに is_generic を保つ（technology は汎用の
+                # まま子へ移る、というシード投入の作法としては正しい）が、
+                # ここは別の話（提案の想定に合わせる）なので明示的に False にする
+                rule.is_generic = False
+                moved += 1
 
     await session.flush()
     reclassified = await reclassify_all(session)

@@ -21,8 +21,10 @@ _MIN_CHILD_ARTICLES = 8
 _MAX_NEW_CHILDREN = 4
 # 貪欲詰めの 1 ビンあたり上限（limit のこの割合まで）。分割直後に再超過しないための余裕
 _BIN_FILL_RATIO = 0.8
-# 新しい兄弟ジャンルに割り当てる priority のデフォルト値（親に priority が無い場合の保険）
-_DEFAULT_NEW_GENRE_PRIORITY = 100
+# 新しい兄弟ジャンルに割り当てる priority のデフォルト値（親に priority が無い場合の保険）。
+# genre_split_store.apply_suggestion の other 由来トップレベルでも同じ値を使うため、
+# モジュール境界を越えて公開する（先頭アンダースコアを外している）
+DEFAULT_NEW_GENRE_PRIORITY = 100
 # そのジャンルの未読の何割以上に出現するタグを「受け皿」とみなすか
 _DEMOTE_COVERAGE = 0.8
 
@@ -186,7 +188,7 @@ def _plan_split_own_tags(
         tag_moves=tag_moves,
         demote=set(),
         new_priorities={
-            k: rules.priority.get(parent_key, _DEFAULT_NEW_GENRE_PRIORITY) for k in keys
+            k: rules.priority.get(parent_key, DEFAULT_NEW_GENRE_PRIORITY) for k in keys
         },
         new_parents={k: parent_key for k in keys},
     )
@@ -294,9 +296,9 @@ def _plan_promote_free_tags(
     # other 由来の新トップレベルは既定の priority とし、既存ジャンルを侵さない。
     # 兄弟のときは親と同じ priority（既存のサブジャンルと同じ作法）
     new_priority = (
-        _DEFAULT_NEW_GENRE_PRIORITY
+        DEFAULT_NEW_GENRE_PRIORITY
         if is_other
-        else rules.priority.get(parent_key, _DEFAULT_NEW_GENRE_PRIORITY)
+        else rules.priority.get(parent_key, DEFAULT_NEW_GENRE_PRIORITY)
     )
     # 新しい子は親と同じ priority を持つので必ず同順位になり、_resolve は
     # キーの辞書順で決める。新キーが親キーの接頭辞を含む文字列である以上、

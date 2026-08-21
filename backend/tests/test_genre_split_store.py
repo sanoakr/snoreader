@@ -633,3 +633,216 @@ async def test_apply_to_a_childless_top_level_genre_makes_children_of_it(
         assert child.parent_id == security.id
         # 兄弟の場合と同じ規則で親の priority を継ぐ（この場合は親 = security 自身）
         assert child.priority == security.priority
+
+
+@pytest.mark.asyncio
+async def test_apply_from_other_creates_a_genuine_top_level_genre(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """genre_key="other" からの適用は、新しいジャンルを本当のトップレベルにする
+    (parent_id=None, priority=DEFAULT_NEW_GENRE_PRIORITY)。
+
+    この is_other 分岐は今まで手元の検証スクリプトでしか確かめていなかった
+    ので、テストとして固定する。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreSplitSuggestion
+    from app.services.genre_split_planner import DEFAULT_NEW_GENRE_PRIORITY
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    # どちらのルールにも当たらないタグを 2 種類使う。1 種類だけだと
+    # promote_free_tags が全件を 1 つの新ジャンルに詰め込むだけになり、
+    # 詰め込んだ先も上限を超えて棄却される（分割の意味がない）
+    await _make_articles([('["zzzalpha"]', 30), ('["zzzbeta"]', 25)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if r.genre_key == "other")
+        proposal = payload_to_proposal(target.payload)
+        assert proposal.children  # other は promote_free_tags でしか成立しない
+        target_id = target.id
+
+    async with async_session() as session:
+        await apply_suggestion(session, target_id)
+        await session.commit()
+
+    async with async_session() as session:
+        for child in proposal.children:
+            genre = (
+                await session.execute(select(Genre).where(Genre.key == child.key))
+            ).scalar_one()
+            # 本当にトップレベル: 親を持たず、default priority を使う
+            assert genre.parent_id is None
+            assert genre.priority == DEFAULT_NEW_GENRE_PRIORITY
+        # 何かの子にもなっていない（他ジャンルの parent_id から見ても孤立している）
+        all_genres = (await session.execute(select(Genre))).scalars().all()
+        new_keys = {c.key for c in proposal.children}
+        assert not any(g.parent_id is not None and g.key in new_keys for g in all_genres)
+
+
+@pytest.mark.asyncio
+async def test_apply_resets_is_generic_when_reassigning_an_existing_rule(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """既存の GenreRule を新しい子へ付け替えるとき、is_generic は False に戻る。
+
+    _simulate の tag_moves は移した先を常に tag_to_genre（通常段）に置いて
+    件数を測っている。付け替え後も is_generic=True が残っていると、通常段
+    より優先度の低い汎用段に落ちてしまい、reclassify_all の結果が利用者の
+    承認した件数と食い違う。ここでは「スナップショット保存後、利用者が
+    管理画面でそのタグを is_generic=True に手動で変えた」状況を直接 DB
+    操作で作って確認する。
+
+    対比: genre_seed.seed_subgenres がタグを子へ移すときは is_generic を
+    保つ（technology は汎用のまま子へ移る、というシード投入としては正しい
+    作法）。ここは提案の想定（tag_moves は常に通常段）に合わせる別の話なので、
+    明示的に False にする。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreRule, GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    async with async_session() as session:
+        widgets = Genre(key="widgets", label_ja="ウィジェット", priority=50)
+        session.add(widgets)
+        await session.flush()
+        session.add(GenreRule(tag="widget-a", genre_id=widgets.id, is_generic=False))
+        session.add(GenreRule(tag="widget-b", genre_id=widgets.id, is_generic=False))
+        await session.commit()
+
+    # widget-a が多数派（受け皿として残る）、widget-b が少数派（新しい兄弟へ移る）
+    await _make_articles([('["widget-a"]', 40), ('["widget-b"]', 20)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(
+            r for r in rows if r.strategy == "split_own_tags" and r.genre_key == "widgets"
+        )
+        proposal = payload_to_proposal(target.payload)
+        assert proposal.children and proposal.children[0].tags == ("widget-b",)
+        target_id = target.id
+        child_key = proposal.children[0].key
+
+    # スナップショット保存後、利用者が widget-b のルールを汎用に変えたとする
+    async with async_session() as session:
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == "widget-b"))
+        ).scalar_one()
+        rule.is_generic = True
+        await session.commit()
+
+    async with async_session() as session:
+        await apply_suggestion(session, target_id)
+        await session.commit()
+
+    async with async_session() as session:
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == "widget-b"))
+        ).scalar_one()
+        child = (
+            await session.execute(select(Genre).where(Genre.key == child_key))
+        ).scalar_one()
+        assert rule.genre_id == child.id
+        assert rule.is_generic is False
+
+
+@pytest.mark.asyncio
+async def test_apply_raises_when_a_child_key_collides_with_an_unrelated_genre(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """提案の保存後に、子キーと同名の無関係なジャンルが独立に作られていたら、
+    何も変更せず ValueError で失敗する（黙って乗っ取らない）。
+
+    プランナーは計画時にキー衝突を弾くが、計画から適用までの間に利用者が
+    そのキーのジャンルを別に作った/動かしたら防げない。この操作は利用者の
+    辞書を書き換えるので、黙って誤って書き換えるより、はっきり失敗させて
+    再提案（refresh）を促すほうがずっと良い。
+    """
+    from sqlalchemy import select
+
+    from app.ai import genre_namer
+    from app.database import async_session
+    from app.models import Genre, GenreRule, GenreSplitSuggestion
+    from app.services.genre_split_store import (
+        apply_suggestion,
+        payload_to_proposal,
+        refresh_split_suggestions,
+    )
+
+    async def fake_name(tag_groups):
+        return [g[0] if g else "" for g in tag_groups]
+
+    monkeypatch.setattr(genre_namer, "name_genres", fake_name)
+
+    await _make_articles([('["security", "python"]', 40), ('["security", "monitoring"]', 20)])
+
+    async with async_session() as session:
+        await refresh_split_suggestions(session)
+        await session.commit()
+
+    async with async_session() as session:
+        rows = (await session.execute(select(GenreSplitSuggestion))).scalars().all()
+        target = next(r for r in rows if payload_to_proposal(r.payload).children)
+        child_key = payload_to_proposal(target.payload).children[0].key  # "security_monitoring"
+        target_id = target.id
+
+    # 提案の保存後に、同じキーの無関係なトップレベルジャンルが独立に作られたとする
+    # （apply が意図する親は security の id。無関係なジャンルは parent_id=None
+    # で食い違う）
+    async with async_session() as session:
+        unrelated = Genre(key=child_key, label_ja="無関係なジャンル", priority=999)
+        session.add(unrelated)
+        await session.commit()
+        unrelated_id = unrelated.id
+
+    async with async_session() as session:
+        with pytest.raises(ValueError):
+            await apply_suggestion(session, target_id)
+
+    async with async_session() as session:
+        # 何も変更されていない: 無関係なジャンルはそのまま
+        unrelated_after = await session.get(Genre, unrelated_id)
+        assert unrelated_after is not None
+        assert unrelated_after.label_ja == "無関係なジャンル"
+        assert unrelated_after.parent_id is None
+        assert unrelated_after.priority == 999
+        # monitoring タグにはまだルールが付いていない（変更フェーズに到達していない）
+        rule = (
+            await session.execute(select(GenreRule).where(GenreRule.tag == "monitoring"))
+        ).scalar_one_or_none()
+        assert rule is None
+        # 提案自体もまだ保留中（閉じられていない）
+        suggestion = await session.get(GenreSplitSuggestion, target_id)
+        assert suggestion is not None and suggestion.dismissed_at is None
