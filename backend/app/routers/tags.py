@@ -1,7 +1,7 @@
 """Tag CRUD and article-tag management endpoints."""
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -9,6 +9,42 @@ from app.models import Article, ArticleTag, Tag
 from app.schemas import BulkDeleteTagsRequest, TagCreate, TagOut, TagSuggestion, TagUpdate
 
 router = APIRouter(tags=["tags"])
+
+
+@router.get("/tags/bulk-status", response_model=dict)
+async def tag_bulk_status(session: AsyncSession = Depends(get_session)):
+    """タグ管理モーダルの一括操作 3 つの対象件数。
+
+    押す前に仕事があるかどうかを出すためのもの。件数の定義は各操作の実装
+    （fill_tag_translations / auto_tag_saved_articles / ai_tag_saved_articles）と
+    必ず揃えること。ずれると「対象 0 件」と言いながら動くボタンになる。
+    """
+    # 未翻訳タグ: fill_tag_translations と同じで、ASCII 名のものだけが対象
+    missing_ja = (await session.execute(select(Tag).where(Tag.name_ja.is_(None)))).scalars()
+    untranslated_tags = sum(1 for t in missing_ja if t.name.isascii())
+
+    tag_count = (
+        select(func.count(ArticleTag.tag_id))
+        .where(ArticleTag.article_id == Article.id)
+        .scalar_subquery()
+    )
+    saved = Article.is_saved == True  # noqa: E712
+
+    # キーワード付与: 0 タグは付与、4 タグ以上は剥がして付け直し、1〜3 はスキップ
+    keyword_targets = await session.scalar(
+        select(func.count())
+        .select_from(Article)
+        .where(saved, or_(tag_count == 0, tag_count >= 4))
+    )
+    # AI 生成: タグが 1 つも無い記事だけ
+    ai_targets = await session.scalar(
+        select(func.count()).select_from(Article).where(saved, tag_count == 0)
+    )
+    return {
+        "untranslated_tags": untranslated_tags,
+        "keyword_targets": keyword_targets or 0,
+        "ai_targets": ai_targets or 0,
+    }
 
 
 @router.post("/tags/fill-translations", response_model=dict)

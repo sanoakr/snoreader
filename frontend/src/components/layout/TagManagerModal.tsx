@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ModalShell } from '../common/ModalShell';
-import { useTags, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
+import { useTags, useTagBulkStatus, useRenameTag, useBulkDeleteTags, useAiTagSaved, useAutoTagSaved, useFillTagTranslations } from '../../hooks/useTags';
 
 interface Props {
   // 表示名の言語はアプリ全体の設定。サイドバー見出しのトグルと同じ状態を切り替える
@@ -14,6 +14,7 @@ interface Props {
 // どれも同じ形で開く（サイドバー内にインラインで開くと一覧が押し下がる）。
 export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
   const { data: tags } = useTags();
+  const { data: bulkStatus } = useTagBulkStatus();
   const renameTag = useRenameTag();
   const bulkDeleteTags = useBulkDeleteTags();
   const aiTagSaved = useAiTagSaved();
@@ -57,19 +58,21 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
         </div>
       </div>
 
-      {/* 一括操作は「何をするのか」を 1 行の説明で見せる。ラベルだけでは
-          Auto tag / AI tag の違い（LLM を使うか、既存タグだけを使うか）が伝わらなかった */}
+      {/* 各操作の対象件数を出す。実際には仕事が無いのに押せるボタンだと、
+          押して何も起きないのが「壊れている」ように見える */}
       <div className="grid gap-2 border-y border-gray-200 py-2 dark:border-gray-700 sm:grid-cols-3">
         <BulkAction
           label="日本語名を補完"
-          description="英語名だけのタグに、AI が日本語名を付ける"
+          target={bulkStatus && `未翻訳 ${bulkStatus.untranslated_tags} タグ`}
+          idle={bulkStatus?.untranslated_tags === 0}
           status={fillTranslations.isPending ? '実行中...' : fillTranslations.isSuccess ? '完了' : null}
-          disabled={fillTranslations.isPending}
+          pending={fillTranslations.isPending}
           onClick={() => fillTranslations.mutate()}
         />
         <BulkAction
           label="キーワードで付与"
-          description="既存タグ名が本文にある Saved 記事に、最大 3 件付ける（AI 不使用・即時）"
+          target={bulkStatus && `対象 ${bulkStatus.keyword_targets} 記事`}
+          idle={bulkStatus?.keyword_targets === 0}
           status={
             autoTagSaved.isPending
               ? '照合中...'
@@ -77,12 +80,13 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
                 ? `${autoTagSaved.data.processed} 記事に ${autoTagSaved.data.attached} 件付与`
                 : null
           }
-          disabled={autoTagSaved.isPending}
+          pending={autoTagSaved.isPending}
           onClick={() => autoTagSaved.mutate()}
         />
         <BulkAction
           label="AI でタグを生成"
-          description="タグが無い Saved 記事に、AI が新しいタグを付ける（1 回 10 記事）"
+          target={bulkStatus && `対象 ${bulkStatus.ai_targets} 記事`}
+          idle={bulkStatus?.ai_targets === 0}
           status={
             aiTagSaved.isPending
               ? '投入中...'
@@ -90,7 +94,7 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
                 ? `${aiTagSaved.data.queued} 記事を投入（残り ${aiTagSaved.data.remaining}）`
                 : null
           }
-          disabled={aiTagSaved.isPending}
+          pending={aiTagSaved.isPending}
           onClick={() => aiTagSaved.mutate()}
         />
       </div>
@@ -144,25 +148,28 @@ export function TagManagerModal({ tagLang, onToggleTagLang, onClose }: Props) {
   );
 }
 
-/** 一括操作 1 つ分。ラベルの下に処理内容を 1 行で書き、実行後はそこに結果を出す */
+/** 一括操作 1 つ分。ラベルの下に対象件数を出し、実行後はそこに結果を出す。
+    対象が 0 件なら押しても何も起きないので、その旨を出して無効にする */
 function BulkAction({
-  label, description, status, disabled, onClick,
+  label, target, idle, status, pending, onClick,
 }: {
   label: string;
-  description: string;
+  // 件数の取得前は undefined
+  target: string | undefined | false;
+  idle: boolean;
   status: string | null;
-  disabled: boolean;
+  pending: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
+      disabled={pending || (idle && !status)}
       className="rounded border border-gray-300 px-2 py-1.5 text-left hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
     >
       <span className="block text-xs font-medium text-gray-700 dark:text-gray-200">{label}</span>
       <span className={`mt-0.5 block text-[11px] leading-snug ${status ? 'text-green-600' : 'text-gray-400'}`}>
-        {status ?? description}
+        {status ?? target ?? '…'}
       </span>
     </button>
   );
