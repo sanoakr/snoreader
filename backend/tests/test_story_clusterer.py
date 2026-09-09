@@ -71,6 +71,9 @@ def test_ugc_hosts_are_excluded(url: str) -> None:
         "https://news.yahoo.co.jp/articles/abc",
         "https://www.publickey1.jp/blog/26/x.html",
         "https://www.techno-edge.net/article/2026/01/1.html",
+        "https://www.netflix.com/title/1",  # x.com substring を含むが除外しない
+        "https://www.fedex.com/x",          # x.com substring を含むが除外しない
+        "https://www.box.com/x",            # x.com substring を含むが除外しない
     ],
 )
 def test_news_hosts_are_not_excluded(url: str) -> None:
@@ -84,6 +87,15 @@ def test_publickey_path_containing_blog_is_not_ugc():
 
 def test_similarity_ignores_punctuation_and_spacing():
     assert title_similarity("桐谷広人さん　前立腺と大腸にがん", "桐谷広人さん 前立腺と大腸にがん") == 1.0
+
+
+def test_similarity_normalizes_curly_quotes():
+    """カーリークォートと直線クォートは同じに正規化される。"""
+    # 直線引用符: straight quotes
+    straight = 'Hello "world" and \'text\''
+    # カーリークォート: curly quotes U+201C, U+201D, U+2019
+    curly = "Hello “world” and ’text’"
+    assert title_similarity(straight, curly) == 1.0
 
 
 def test_similarity_is_zero_for_unrelated_titles():

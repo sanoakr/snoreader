@@ -31,7 +31,11 @@ WINDOW_HOURS: int = 12
 CANDIDATE_HOURS: int = 2
 
 # UGC / 個人発信のホスト。ここを対象外にすることが判定の要（モジュール docstring 参照）。
-# 末尾がドットのものはサブドメイン接頭辞の意図で、ホスト名の先頭でのみ一致させる
+# マーカーの形状によって異なるマッチング規則を適用:
+# 1. ドット末尾のもの（blog., tech., docs.）: host.startswith(marker)
+# 2. ドット含有（zenn.dev, x.com, youtube.com）: host == marker or host.endswith("." + marker)
+#    （素の substring マッチは netflix.com を x.com で誤除外するため NG）
+# 3. ドット非含有（hatenablog, hatenadiary）: marker in host（substring マッチで OK）
 _UGC_HOST_MARKERS = (
     "zenn.dev", "qiita.com", "github.com", "note.com", "hatenablog", "hatenadiary",
     "speakerdeck.com", "anond.hatelabo.jp", "togetter.com", "posfie.com",
@@ -41,7 +45,7 @@ _UGC_HOST_MARKERS = (
 _UGC_HOST_PREFIXES = ("blog.", "tech.", "docs.")
 
 # タイトル比較の前に落とす記号・空白（媒体ごとの飾りを無視するため）
-_TITLE_JUNK_RE = re.compile(r"[\s\-–—|｜/／【】\[\]（）()「」『』\"''"":：,、。.!！?？…]+")
+_TITLE_JUNK_RE = re.compile(r"[\s\-–—|｜/／【】\[\]（）()「」『』\"'’“”:：,、。.!！?？…]+")
 
 
 def is_ugc_host(url: str) -> bool:
@@ -51,9 +55,20 @@ def is_ugc_host(url: str) -> bool:
     host = normalized_host(url)
     if not host:
         return False
-    if any(marker in host for marker in _UGC_HOST_MARKERS):
+    # ドット末尾のもの（prefix）: 先頭一致
+    if host.startswith(_UGC_HOST_PREFIXES):
         return True
-    return host.startswith(_UGC_HOST_PREFIXES)
+    # ドット含有のマーカー: 完全一致または .marker で終わる
+    for marker in _UGC_HOST_MARKERS:
+        if "." in marker:
+            if host == marker or host.endswith("." + marker):
+                return True
+    # ドット非含有のマーカー: substring 一致
+    for marker in _UGC_HOST_MARKERS:
+        if "." not in marker:
+            if marker in host:
+                return True
+    return False
 
 
 def _title_bigrams(title: str) -> frozenset[str]:
