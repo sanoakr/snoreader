@@ -185,6 +185,14 @@ def test_normalized_host_strips_www_and_applies_alias():
     assert normalized_host("not a url") == ""
 
 
+def test_is_quote_feed_detects_hatena_bookmark():
+    from app.services.deduplicator import is_quote_feed
+
+    assert is_quote_feed("https://b.hatena.ne.jp/hotentry.rss") is True
+    assert is_quote_feed("https://zenn.dev/feed") is False
+    assert is_quote_feed(None) is False
+
+
 # --- サービス層 / エンドポイントの統合テスト ---
 
 @pytest_asyncio.fixture

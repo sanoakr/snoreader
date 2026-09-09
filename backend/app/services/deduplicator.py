@@ -126,7 +126,8 @@ def normalize_url(url: str) -> str:
         return url
 
 
-def _is_hatena(feed_url: str | None) -> bool:
+def is_quote_feed(feed_url: str | None) -> bool:
+    """他サイトの記事を再配信する引用フィードか（現状ははてなブックマークのみ）。"""
     return _HATENA_MARKER in (feed_url or "")
 
 
@@ -242,7 +243,7 @@ async def dedup_articles(
             rows.sort(
                 key=lambda row: (
                     not row[0].is_saved,
-                    _is_hatena(row[1]),
+                    is_quote_feed(row[1]),
                     row[0].fetched_at,
                     row[0].id,
                 )
