@@ -1,4 +1,4 @@
-import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ChatSuggestionsResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, SplitSuggestion, Tag, TagSuggestion } from '../types';
+import type { Article, ArticleDetail, ArticleFilters, ChatMessage, ChatResponse, ChatSuggestionsResponse, ExcludePattern, ExtractAction, Feed, GenreCount, GenreDef, PaginatedArticles, SplitSuggestion, SubscribedHosts, Tag, TagSuggestion } from '../types';
 
 const BASE = '/api';
 
@@ -32,6 +32,10 @@ export function deleteFeed(id: number): Promise<void> {
 
 export function refreshFeed(id: number): Promise<{ new_articles: number }> {
   return fetchJSON(`${BASE}/feeds/${id}/refresh`, { method: 'POST' });
+}
+
+export function getSubscribedHosts(): Promise<SubscribedHosts> {
+  return fetchJSON(`${BASE}/feeds/subscribed-hosts`);
 }
 
 // --- Articles ---

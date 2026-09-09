@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from sqlalchemy import func, select, update
@@ -25,6 +26,11 @@ _TRACKING_PARAMS = {
     "_hsenc", "_hsmi", "mkt_tok",  # HubSpot / Marketo
     "n_cid", "cx_testId",  # 国内メディア配信系
     "display",  # toyokeizai.net / newsweekjapan.jp 等の表示モード切替 (?display=b)。同一記事
+    # 以下 2026-09-10 追加。いずれも実データで同一記事の別 URL を作っていたもの
+    "page",  # toyokeizai / togetter / dot.asahi のページ送り
+    "timestamp",  # querie.me
+    "DETAIL",  # news-postseven（値なし）
+    "__readwiseLocation",  # Readwise 経由の共有 URL（値なし）
 }
 # 意図的に除去しない: ref / source / from は GitHub 等で機能パラメータとして使われるため、
 # 除去すると誤って別記事を同一視するリスクがある（見逃す方向の方が安全）。
@@ -33,12 +39,49 @@ _TRACKING_PARAMS = {
 _DOMAIN_ALIASES = {
     "asahi.com": "digital.asahi.com",
     "delete-all.hatenablog.com": "soredoko.jp",
+    # モバイル版サブドメイン。m./s./sp. の一括除去は全 17,218 件でこの 1 件しか
+    # 効かず、m.media-amazon.com のような無関係ホストを別ホストに潰すので個別に列挙する
+    "s.japanese.joins.com": "japanese.joins.com",
 }
 
 _HATENA_MARKER = "b.hatena.ne.jp"
 
+# ホスト別のパス書き換え。モバイル版・軽量版の URL を正規版に寄せる。
+# _DOMAIN_ALIASES を引いた後のホストで参照する
+_PATH_REWRITES: dict[str, tuple[tuple[re.Pattern[str], str], ...]] = {
+    "jiji.com": ((re.compile(r"^/sp/"), "/jc/"),),
+    "news.livedoor.com": ((re.compile(r"^/lite/article_detail/"), "/article/detail/"),),
+    "nikkansports.com": (
+        (re.compile(r"^/m/"), "/"),
+        (re.compile(r"_m\.html$"), ".html"),
+    ),
+}
+
+# 末尾のページ番号セグメント。/2〜/9 に限り、かつ直前セグメントが 1〜2 桁の数字
+# **でない**ときだけ剥がす。素朴に「末尾の 1〜2 桁の数字を除去」すると
+# onaji.me/entry/2026/08/{18,21,24} が 1 キーに潰れて別記事 3 件がマージされる
+# （2026-09-10 実測）。取りこぼす方向に倒してある
+_TRAILING_PAGE_RE = re.compile(r"^(?P<head>/.*/(?P<prev>[^/]+))/[2-9]$")
+_SHORT_NUMBER_RE = re.compile(r"\d{1,2}")
+
 # 並列フェッチ・手動リフレッシュ・手動一括掃除が同時に走らないよう直列化する
 _dedup_lock = asyncio.Lock()
+
+
+def normalized_host(url: str) -> str:
+    """比較用のホスト名。www. を落とし、既知のドメイン別名を解決する。
+
+    パースに失敗したら空文字を返す（呼び出し側は「ホスト不明」として扱う）。
+    """
+    if not url:
+        return ""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    return _DOMAIN_ALIASES.get(host, host)
 
 
 def normalize_url(url: str) -> str:
@@ -51,10 +94,7 @@ def normalize_url(url: str) -> str:
         return url
     try:
         parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
-        if host.startswith("www."):
-            host = host[4:]
-        host = _DOMAIN_ALIASES.get(host, host)
+        host = normalized_host(url)
         if parts.port and not (
             (parts.scheme == "http" and parts.port == 80)
             or (parts.scheme == "https" and parts.port == 443)
@@ -62,13 +102,21 @@ def normalize_url(url: str) -> str:
             host = f"{host}:{parts.port}"
 
         path = parts.path
+        for pattern, repl in _PATH_REWRITES.get(host, ()):
+            path = pattern.sub(repl, path)
         if len(path) > 1 and path.endswith("/"):
             path = path.rstrip("/")
+        trailing = _TRAILING_PAGE_RE.match(path)
+        if trailing and not _SHORT_NUMBER_RE.fullmatch(trailing.group("prev")):
+            path = trailing.group("head")
 
         query_pairs = sorted(
             (k, v)
             for k, v in parse_qsl(parts.query, keep_blank_values=True)
-            if not k.lower().startswith(_TRACKING_PREFIXES) and k not in _TRACKING_PARAMS
+            if not k.lower().startswith(_TRACKING_PREFIXES)
+            and k not in _TRACKING_PARAMS
+            # ?p= は WordPress の記事 ID にも使われるので値が all のときだけ落とす
+            and not (k == "p" and v == "all")
         )
         query = urlencode(query_pairs)
 
@@ -78,7 +126,8 @@ def normalize_url(url: str) -> str:
         return url
 
 
-def _is_hatena(feed_url: str | None) -> bool:
+def is_quote_feed(feed_url: str | None) -> bool:
+    """他サイトの記事を再配信する引用フィードか（現状ははてなブックマークのみ）。"""
     return _HATENA_MARKER in (feed_url or "")
 
 
@@ -194,7 +243,7 @@ async def dedup_articles(
             rows.sort(
                 key=lambda row: (
                     not row[0].is_saved,
-                    _is_hatena(row[1]),
+                    is_quote_feed(row[1]),
                     row[0].fetched_at,
                     row[0].id,
                 )

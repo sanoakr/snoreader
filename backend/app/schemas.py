@@ -279,3 +279,12 @@ class ChatSuggestionsResponse(BaseModel):
 
 class ChatFollowupRequest(BaseModel):
     history: list[ChatMessage] = []
+
+
+# --- Source coverage ---
+
+class SubscribedHostsOut(BaseModel):
+    """引用フィードから除外される「購読済みサイト」の状態（読み取り専用）。"""
+
+    enabled: bool
+    hosts: list[str]

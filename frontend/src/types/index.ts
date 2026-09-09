@@ -12,6 +12,12 @@ export interface Feed {
   unread_count: number;
 }
 
+// 引用フィード（はてブ）取り込み時にスキップされる「購読済みサイト」の状態（読み取り専用）
+export interface SubscribedHosts {
+  enabled: boolean;
+  hosts: string[];
+}
+
 export interface Tag {
   id: number;
   name: string;

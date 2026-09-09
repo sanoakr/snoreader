@@ -93,6 +93,106 @@ def test_normalize_url_applies_domain_alias():
     assert a == b
 
 
+# --- A: URL 表記ゆれの吸収（2026-09-10 実測、backend/data の全 17,218 件で誤爆 0 件） ---
+
+def test_normalize_url_maps_mobile_subdomain_alias():
+    a = normalize_url("https://s.japanese.joins.com/JArticle/352523?sectcode=A00")
+    b = normalize_url("https://japanese.joins.com/JArticle/352523?sectcode=A00")
+    assert a == b
+
+
+def test_normalize_url_rewrites_jiji_sp_path():
+    a = normalize_url("https://www.jiji.com/sp/article?k=2026071600709&g=pol")
+    b = normalize_url("https://www.jiji.com/jc/article?k=2026071600709&g=pol")
+    assert a == b
+
+
+def test_normalize_url_rewrites_jiji_sp_path_for_v8():
+    a = normalize_url("https://www.jiji.com/sp/v8?id=20260824occupied_jp_photo")
+    b = normalize_url("https://www.jiji.com/jc/v8?id=20260824occupied_jp_photo")
+    assert a == b
+
+
+def test_normalize_url_rewrites_livedoor_lite_path():
+    a = normalize_url("https://news.livedoor.com/lite/article_detail/32156268/")
+    b = normalize_url("https://news.livedoor.com/article/detail/32156268/")
+    assert a == b
+
+
+def test_normalize_url_rewrites_nikkansports_mobile_path():
+    a = normalize_url(
+        "https://www.nikkansports.com/m/entertainment/news/202608160000671_m.html"
+    )
+    b = normalize_url(
+        "https://www.nikkansports.com/entertainment/news/202608160000671.html"
+    )
+    assert a == b
+
+
+def test_normalize_url_strips_trailing_page_segment():
+    a = normalize_url("https://omocoro.jp/kiji/580351/2/")
+    b = normalize_url("https://omocoro.jp/kiji/580351/")
+    assert a == b
+
+
+def test_normalize_url_keeps_date_path_with_day_segment():
+    """日付パスの「日」を末尾ページ番号と誤認しない（実測での誤爆ケース）。
+
+    素朴に「末尾の 1〜2 桁の数字セグメントを除去」すると
+    onaji.me/entry/2026/08/{18,21,24} が同一キーに潰れ、別記事 3 件が
+    1 件にマージされる。直前セグメントが 1〜2 桁の数字なら剥がさない。
+    """
+    keys = {
+        normalize_url("https://onaji.me/entry/2026/08/18"),
+        normalize_url("https://onaji.me/entry/2026/08/21"),
+        normalize_url("https://onaji.me/entry/2026/08/24"),
+    }
+    assert len(keys) == 3
+
+
+def test_normalize_url_keeps_single_digit_date_path():
+    a = normalize_url("https://onaji.me/entry/2026/08/3")
+    b = normalize_url("https://onaji.me/entry/2026/08")
+    assert a != b
+
+
+def test_normalize_url_strips_page_query():
+    a = normalize_url("https://toyokeizai.net/articles/-/952119?page=3")
+    b = normalize_url("https://toyokeizai.net/articles/-/952119")
+    assert a == b
+
+
+def test_normalize_url_strips_blank_junk_params():
+    base = "https://qiita.com/u/items/abc"
+    assert normalize_url(f"{base}?__readwiseLocation=") == normalize_url(base)
+    assert normalize_url(f"{base}?DETAIL") == normalize_url(base)
+    assert normalize_url(f"{base}?timestamp=1783857343") == normalize_url(base)
+
+
+def test_normalize_url_strips_p_all_but_keeps_other_p_values():
+    a = normalize_url("https://www.j-cast.com/2026/08/14517135.html?p=all")
+    b = normalize_url("https://www.j-cast.com/2026/08/14517135.html")
+    assert a == b
+    # ?p= は WordPress の記事 ID にも使われるので値が all のときだけ落とす
+    assert normalize_url("https://example.com/?p=123") != normalize_url("https://example.com/")
+
+
+def test_normalized_host_strips_www_and_applies_alias():
+    from app.services.deduplicator import normalized_host
+
+    assert normalized_host("https://www.itmedia.co.jp/news/x.html") == "itmedia.co.jp"
+    assert normalized_host("https://www.asahi.com/a.html") == "digital.asahi.com"
+    assert normalized_host("not a url") == ""
+
+
+def test_is_quote_feed_detects_hatena_bookmark():
+    from app.services.deduplicator import is_quote_feed
+
+    assert is_quote_feed("https://b.hatena.ne.jp/hotentry.rss") is True
+    assert is_quote_feed("https://zenn.dev/feed") is False
+    assert is_quote_feed(None) is False
+
+
 # --- サービス層 / エンドポイントの統合テスト ---
 
 @pytest_asyncio.fixture
