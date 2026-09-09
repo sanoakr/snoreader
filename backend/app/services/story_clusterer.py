@@ -1,0 +1,72 @@
+"""同じニュースを別媒体が報じた記事を検出し、代表 1 件だけ残す。
+
+URL は一致しないので `deduplicator` では捕まらない。タイトルの文字バイグラム
+Jaccard で測るが、**閾値だけでは真陽性と偽陽性を分離できない**（2026-09-10 に
+本番 DB 全 17,218 件で総当たりして確認）:
+
+    0.54  [Zenn]  SRE NEXT 2026に登壇・参加してきました
+       || [はてブ] SRE NEXT 2026に参加しました｜maru            ← 別人の参加記
+    0.43  [Qiita] なぜ、AI時代においてC#は最適な言語の1つなのか？
+       || [Zenn]  なぜAI時代にGoが最適な言語なのか                ← 全くの別記事
+
+一方、真陽性は 0.40 まで下がってくる。分離できたのは**発信主体**で、偽陽性は
+すべて UGC / 個人発信のホストが絡んでいた。`_UGC_HOST_MARKERS` の除外を外すと
+上の誤爆が復活するので、「単純化」で落とさないこと。除外を入れると閾値 0.45 /
+窓 12 時間で 30 組 / 60 日、目視での偽陽性は 1 組まで下がる。
+
+判定は削除ではなく `dismissed_at` を立てる。A（URL 一致）と違って判定がファジー
+なので、誤爆を「非表示」ビューで確認して戻せる状態にしておく。
+"""
+
+from __future__ import annotations
+
+import re
+
+# 2026-09-10 実測。0.45 未満に下げると別記事が、上げると真陽性が落ちる
+SIMILARITY_THRESHOLD: float = 0.45
+# 突き合わせる時間窓（fetched_at 基準）
+WINDOW_HOURS: int = 12
+# 候補にする「今サイクルで新規取得された記事」の範囲。既定のフェッチ間隔は 60 分。
+# これがあるので、ユーザーが手で非表示を解除した記事を毎時間再び非表示にしない
+CANDIDATE_HOURS: int = 2
+
+# UGC / 個人発信のホスト。ここを対象外にすることが判定の要（モジュール docstring 参照）。
+# 末尾がドットのものはサブドメイン接頭辞の意図で、ホスト名の先頭でのみ一致させる
+_UGC_HOST_MARKERS = (
+    "zenn.dev", "qiita.com", "github.com", "note.com", "hatenablog", "hatenadiary",
+    "speakerdeck.com", "anond.hatelabo.jp", "togetter.com", "posfie.com",
+    "medium.com", "dev.to", "huggingface.co", "x.com", "twitter.com",
+    "youtube.com", "scrapbox.io", "hamusoku.com",
+)
+_UGC_HOST_PREFIXES = ("blog.", "tech.", "docs.")
+
+# タイトル比較の前に落とす記号・空白（媒体ごとの飾りを無視するため）
+_TITLE_JUNK_RE = re.compile(r"[\s\-–—|｜/／【】\[\]（）()「」『』\"''"":：,、。.!！?？…]+")
+
+
+def is_ugc_host(url: str) -> bool:
+    """UGC / 個人発信のホストか。クラスタリングの対象外にする。"""
+    from app.services.deduplicator import normalized_host
+
+    host = normalized_host(url)
+    if not host:
+        return False
+    if any(marker in host for marker in _UGC_HOST_MARKERS):
+        return True
+    return host.startswith(_UGC_HOST_PREFIXES)
+
+
+def _title_bigrams(title: str) -> frozenset[str]:
+    text = _TITLE_JUNK_RE.sub("", title).lower()
+    if len(text) < 2:
+        return frozenset([text]) if text else frozenset()
+    return frozenset(text[i : i + 2] for i in range(len(text) - 1))
+
+
+def title_similarity(a: str, b: str) -> float:
+    """タイトルの文字バイグラム Jaccard 係数（0.0〜1.0）。"""
+    sa, sb = _title_bigrams(a), _title_bigrams(b)
+    if not sa or not sb:
+        return 0.0
+    union = len(sa | sb)
+    return len(sa & sb) / union if union else 0.0
