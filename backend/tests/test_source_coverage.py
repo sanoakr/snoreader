@@ -98,6 +98,25 @@ async def test_subscribed_hosts_ignores_quote_feeds(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
+async def test_subscribed_hosts_ignores_imported_feed(client: AsyncClient) -> None:
+    """インポート由来の合成フィード（snoreader://imported）は複数サイト混在なので寄与しない。
+
+    寄与させると、インポート直後に無関係なホストが「購読済み」扱いになり、
+    はてブがそのホストの配信を静かに止めてしまう（UI から解除する手段もない）。
+    """
+    from app.database import async_session
+    from app.services.source_coverage import subscribed_hosts
+
+    async with async_session() as session:
+        feed = await _make_feed(session, "snoreader://imported")
+        await _make_articles(session, feed.id, "https://note.com/x", 10)
+        await session.commit()
+
+    async with async_session() as session:
+        assert await subscribed_hosts(session) == set()
+
+
+@pytest.mark.asyncio
 async def test_subscribed_hosts_requires_minimum_article_count(client: AsyncClient) -> None:
     """混入 1〜2 件のホストでそのサイト全体を巻き添えにしない。
 

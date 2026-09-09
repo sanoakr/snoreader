@@ -35,7 +35,6 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const { data: excludePatterns } = useExcludePatterns();
   const createExcludePattern = useCreateExcludePattern();
   const deleteExcludePattern = useDeleteExcludePattern();
-  const { data: subscribedHosts } = useSubscribedHosts();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
@@ -45,6 +44,10 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const [feedToolsOpen, setFeedToolsOpen] = useState(false);
   const opmlFileRef = useRef<HTMLInputElement>(null);
   const articlesFileRef = useRef<HTMLInputElement>(null);
+  // フィード ⚙ パネル（feedToolsOpen）を開いたときだけ取得する。全フィード×全記事を
+  // 突き合わせる重いクエリなので、パネルを開いていないアプリ起動時にまで
+  // 無条件で叩くのは無駄
+  const { data: subscribedHosts } = useSubscribedHosts(feedToolsOpen);
 
   const totalUnread = feeds?.reduce((s, f) => s + f.unread_count, 0) ?? 0;
   const { data: recommendedCount } = useRecommendedCount();
