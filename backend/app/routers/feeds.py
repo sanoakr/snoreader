@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Article, Feed
-from app.schemas import FeedCreate, FeedOut, FeedUpdate
+from app.schemas import FeedCreate, FeedOut, FeedUpdate, SubscribedHostsOut
 from app.services.deduplicator import dedup_articles
 from app.services.feed_fetcher import fetch_feed
 
@@ -34,6 +34,22 @@ async def list_feeds(session: AsyncSession = Depends(get_session)):
         feed_out.unread_count = row[1]
         feeds.append(feed_out)
     return feeds
+
+
+@router.get("/feeds/subscribed-hosts", response_model=SubscribedHostsOut)
+async def get_subscribed_hosts(session: AsyncSession = Depends(get_session)):
+    """引用フィード（はてブ）の取り込み時にスキップされるホストの一覧。
+
+    オン/オフは env（SNOREADER_SKIP_SUBSCRIBED_HOSTS_IN_QUOTE_FEEDS）なので、
+    ここは表示専用。
+    """
+    from app.config import settings
+    from app.services.source_coverage import subscribed_hosts
+
+    return SubscribedHostsOut(
+        enabled=settings.skip_subscribed_hosts_in_quote_feeds,
+        hosts=sorted(await subscribed_hosts(session)),
+    )
 
 
 @router.post("/feeds", response_model=FeedOut, status_code=201)

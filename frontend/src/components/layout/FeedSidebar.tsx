@@ -4,6 +4,7 @@ import { useFeeds, useCreateFeed, useDeleteFeed, useRefreshFeed, useImportOpml, 
 import { useRecommendedCount, useSavedCount, useAiStatus, useExtractFailed, useGenreCounts } from '../../hooks/useArticles';
 import { useTags } from '../../hooks/useTags';
 import { useExcludePatterns, useCreateExcludePattern, useDeleteExcludePattern } from '../../hooks/useExcludePatterns';
+import { useSubscribedHosts } from '../../hooks/useSubscribedHosts';
 import { opmlExportUrl, savedArticlesExportUrl } from '../../api/client';
 import { GenreManagerModal } from './GenreManagerModal';
 import { TagManagerModal } from './TagManagerModal';
@@ -34,6 +35,7 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
   const { data: excludePatterns } = useExcludePatterns();
   const createExcludePattern = useCreateExcludePattern();
   const deleteExcludePattern = useDeleteExcludePattern();
+  const { data: subscribedHosts } = useSubscribedHosts();
   const [newUrl, setNewUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
@@ -409,6 +411,20 @@ export function FeedSidebar({ filters, onFilterChange, tagLang, onToggleTagLang,
                 </form>
                 {createExcludePattern.isError && (
                   <p className="text-xs text-red-500">{(createExcludePattern.error as Error).message}</p>
+                )}
+              </div>
+            )}
+            {subscribedHosts && (
+              <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                <p>
+                  はてブの重複除外:{' '}
+                  {subscribedHosts.enabled ? '有効' : '無効'}
+                </p>
+                {subscribedHosts.enabled && subscribedHosts.hosts.length > 0 && (
+                  <p className="break-all">
+                    購読済みのため、はてブからは取り込まないサイト:{' '}
+                    {subscribedHosts.hosts.join(', ')}
+                  </p>
                 )}
               </div>
             )}

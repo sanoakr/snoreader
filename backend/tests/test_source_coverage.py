@@ -287,3 +287,19 @@ async def test_fetch_skip_can_be_disabled_by_setting(
 
         feed = await session.get(Feed, quote_id)
         assert await fetch_feed(feed, session) == 1
+
+
+@pytest.mark.asyncio
+async def test_subscribed_hosts_endpoint(client: AsyncClient) -> None:
+    from app.database import async_session
+
+    async with async_session() as session:
+        zenn = await _make_feed(session, "https://zenn.dev/feed")
+        await _make_articles(session, zenn.id, "https://zenn.dev/u/articles", 10)
+        await session.commit()
+
+    res = await client.get("/api/feeds/subscribed-hosts")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["enabled"] is True
+    assert body["hosts"] == ["zenn.dev"]
