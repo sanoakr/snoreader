@@ -198,7 +198,7 @@ async def test_cluster_dismisses_the_shorter_titled_copy(client: AsyncClient) ->
     async with async_session() as session:
         result = await cluster_stories(session)
 
-    assert result == {"clusters": 1, "dismissed": 1}
+    assert result == {"dismissed": 1}
 
     async with async_session() as session:
         from app.models import Article
@@ -272,7 +272,7 @@ async def test_cluster_does_not_group_ugc_articles(client: AsyncClient) -> None:
         await session.commit()
 
     async with async_session() as session:
-        assert await cluster_stories(session) == {"clusters": 0, "dismissed": 0}
+        assert await cluster_stories(session) == {"dismissed": 0}
 
 
 @pytest.mark.asyncio
@@ -288,7 +288,7 @@ async def test_cluster_ignores_same_feed_pairs(client: AsyncClient) -> None:
         await session.commit()
 
     async with async_session() as session:
-        assert await cluster_stories(session) == {"clusters": 0, "dismissed": 0}
+        assert await cluster_stories(session) == {"dismissed": 0}
 
 
 @pytest.mark.asyncio
@@ -322,6 +322,46 @@ async def test_cluster_never_dismisses_saved_articles(client: AsyncClient) -> No
     async with async_session() as session:
         assert (await session.get(Article, saved_id)).dismissed_at is None
         assert (await session.get(Article, other_id)).dismissed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cluster_never_dismisses_when_both_sides_are_saved(client: AsyncClient) -> None:
+    """`if loser.is_saved: continue` の唯一の到達経路。両方保管済みなら誰も消えない。
+
+    片方だけ保管済みのケースは `_representative_rank` の `not article.is_saved` で
+    保管済みが常に代表側に回るため、このガードを削っても通ってしまう
+    （test_cluster_never_dismisses_saved_articles はそれをピン留めできていない）。
+    """
+    from app.database import async_session
+    from app.models import Article
+    from app.services.story_clusterer import cluster_stories
+
+    async with async_session() as session:
+        f1 = await _feed(session, "https://news.yahoo.co.jp/rss/topics/top-picks.xml")
+        f2 = await _feed(session, "https://rss.itmedia.co.jp/rss/1.0/topstory.xml")
+        a = await _article(
+            session,
+            f1.id,
+            "https://news.yahoo.co.jp/pickup/1",
+            "キオクシア 上場来高値から半値に",
+            is_saved=True,
+        )
+        b = await _article(
+            session,
+            f2.id,
+            "https://www.itmedia.co.jp/news/articles/1.html",
+            "キオクシア株、一時ストップ安　上場来高値から半値以下に",
+            is_saved=True,
+        )
+        await session.commit()
+        a_id, b_id = a.id, b.id
+
+    async with async_session() as session:
+        assert await cluster_stories(session) == {"dismissed": 0}
+
+    async with async_session() as session:
+        assert (await session.get(Article, a_id)).dismissed_at is None
+        assert (await session.get(Article, b_id)).dismissed_at is None
 
 
 @pytest.mark.asyncio
@@ -368,7 +408,7 @@ async def test_cluster_skips_articles_outside_the_candidate_window(client: Async
         await session.commit()
 
     async with async_session() as session:
-        assert await cluster_stories(session) == {"clusters": 0, "dismissed": 0}
+        assert await cluster_stories(session) == {"dismissed": 0}
 
 
 @pytest.mark.asyncio
@@ -377,7 +417,7 @@ async def test_cluster_matches_regardless_of_id_order(client: AsyncClient) -> No
 
     controller ruling 2 のピン留め: `pool[:index]` のみを見る実装だと、
     候補（id が小さい・fetched_at が新しい）は自分より前の id しか見ないため
-    この組み合わせを検出できず {"clusters": 0, "dismissed": 0} になってしまう。
+    この組み合わせを検出できず {"dismissed": 0} になってしまう。
     """
     from app.database import async_session
     from app.services.story_clusterer import cluster_stories
@@ -399,3 +439,49 @@ async def test_cluster_matches_regardless_of_id_order(client: AsyncClient) -> No
 
     async with async_session() as session:
         assert (await cluster_stories(session))["dismissed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cluster_does_not_redismiss_after_candidate_window_passes(client: AsyncClient) -> None:
+    """CANDIDATE_HOURS 経過後に手で解除した記事は再び非表示にならない。
+
+    実際に保証できるのはここまで。取得直後（CANDIDATE_HOURS 以内）に解除した
+    場合は次のサイクルでまだ候補扱いなので再び非表示になりうる（この設計の
+    既知の限界。ユーザーが解除したことを覚える永続フラグは持たない）。
+    """
+    from app.database import async_session
+    from app.models import Article
+    from app.services.story_clusterer import cluster_stories
+
+    async with async_session() as session:
+        f1 = await _feed(session, "https://news.yahoo.co.jp/rss/topics/top-picks.xml")
+        f2 = await _feed(session, "https://rss.itmedia.co.jp/rss/1.0/topstory.xml")
+        a = await _article(
+            session,
+            f1.id,
+            "https://news.yahoo.co.jp/pickup/1",
+            "キオクシア 上場来高値から半値に",
+            fetched_at=_iso(6),
+            dismissed_at=_iso(5),  # 過去に非表示になっていた
+        )
+        await _article(
+            session,
+            f2.id,
+            "https://www.itmedia.co.jp/news/articles/1.html",
+            "キオクシア株、一時ストップ安　上場来高値から半値以下に",
+            fetched_at=_iso(6),
+        )
+        await session.commit()
+        a_id = a.id
+
+    # ユーザーが手で解除した状態を再現
+    async with async_session() as session:
+        article = await session.get(Article, a_id)
+        article.dismissed_at = None
+        await session.commit()
+
+    async with async_session() as session:
+        assert await cluster_stories(session) == {"dismissed": 0}
+
+    async with async_session() as session:
+        assert (await session.get(Article, a_id)).dismissed_at is None

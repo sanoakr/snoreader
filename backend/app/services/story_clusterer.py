@@ -36,7 +36,10 @@ SIMILARITY_THRESHOLD: float = 0.45
 # 突き合わせる時間窓（fetched_at 基準）
 WINDOW_HOURS: int = 12
 # 候補にする「今サイクルで新規取得された記事」の範囲。既定のフェッチ間隔は 60 分。
-# これがあるので、ユーザーが手で非表示を解除した記事を毎時間再び非表示にしない
+# 保証できるのは「取得から CANDIDATE_HOURS 経過後は、手で解除した記事が再び
+# 非表示になることはない」まで。取得直後（CANDIDATE_HOURS 以内）に手で解除した
+# 場合は、次のサイクルでまだ候補扱いなので再び非表示になりうる。それを防ぐには
+# 「ユーザーが解除した」を覚える永続フラグが要るが、この設計ではあえて持たない
 CANDIDATE_HOURS: int = 2
 
 # UGC / 個人発信のホスト。ここを対象外にすることが判定の要（モジュール docstring 参照）。
@@ -120,8 +123,11 @@ async def cluster_stories(session: AsyncSession) -> dict:
     候補は直近 CANDIDATE_HOURS に取り込まれた記事、突き合わせ相手は直近
     WINDOW_HOURS の記事。どちらも未読・未 dismiss・非 UGC に限る。保管済みは
     代表になれるよう突き合わせ対象には含めるが、非表示にはしない。
-    候補を新規取得分に絞ってあるので、ユーザーが手で解除した記事を再び
-    非表示にすることがない。
+    候補を新規取得分に絞ってあることで保証できるのは「取得から CANDIDATE_HOURS
+    経過後は、手で解除した記事が再び非表示になることはない」まで。取得直後
+    （CANDIDATE_HOURS 以内）に手で解除した場合は、次のサイクルでまだ候補扱い
+    なので再び非表示になりうる。それを防ぐには「ユーザーが解除した」を覚える
+    永続フラグが要るが、この設計ではあえて持たない。
 
     突き合わせは各候補をプール全体（自分より id が小さい記事だけでなく）と比較する。
     id 順と fetched_at 順は通常一致するが保証はなく、一致しない組み合わせを
@@ -146,12 +152,13 @@ async def cluster_stories(session: AsyncSession) -> dict:
 
     pool = [(article, feed_url) for article, feed_url in rows if not is_ugc_host(article.url)]
     dismissed_ids: set[int] = set()
-    clusters = 0
 
     for article, feed_url in pool:
         if article.fetched_at < candidate_start or article.id in dismissed_ids:
             continue
         for other, other_feed_url in pool:
+            # 連鎖グループ（A~B, B~C だが A≁C）は橋渡し役の B が dismissed_ids に
+            # 入った時点で A・C 双方から見えなくなり、意図的に 2 件とも生き残る
             if other.id == article.id or other.id in dismissed_ids:
                 continue
             if other.feed_id == article.feed_id:
@@ -168,7 +175,6 @@ async def cluster_stories(session: AsyncSession) -> dict:
                 continue
             loser.dismissed_at = now.isoformat()
             dismissed_ids.add(loser.id)
-            clusters += 1
             logger.info(
                 "Same-story cluster: kept %r, dismissed %r", pair[0][0].title, loser.title
             )
@@ -177,4 +183,4 @@ async def cluster_stories(session: AsyncSession) -> dict:
 
     if dismissed_ids:
         await session.commit()
-    return {"clusters": clusters, "dismissed": len(dismissed_ids)}
+    return {"dismissed": len(dismissed_ids)}
