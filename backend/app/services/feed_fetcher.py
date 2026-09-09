@@ -188,6 +188,18 @@ async def fetch_all_feeds() -> None:
 
     async with async_session() as session:
         await dedup_articles(session)
+
+    # 判定はファジーなので、ここで落ちてもフェッチサイクルは成功扱いにする
+    async with async_session() as session:
+        try:
+            from app.services.story_clusterer import cluster_stories
+
+            await cluster_stories(session)
+        except Exception:
+            logger.exception("Failed to cluster same-story articles")
+            await session.rollback()
+
+    async with async_session() as session:
         await cleanup_old_articles(session)
 
     # 未読が増えるのはフィードを取得した瞬間だけなので、上限超の検知はここで 1 回。

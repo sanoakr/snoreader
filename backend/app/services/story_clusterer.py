@@ -20,7 +20,16 @@ Jaccard で測るが、**閾値だけでは真陽性と偽陽性を分離でき�
 
 from __future__ import annotations
 
+import logging
 import re
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Article, Feed
+
+logger = logging.getLogger(__name__)
 
 # 2026-09-10 実測。0.45 未満に下げると別記事が、上げると真陽性が落ちる
 SIMILARITY_THRESHOLD: float = 0.45
@@ -85,3 +94,87 @@ def title_similarity(a: str, b: str) -> float:
         return 0.0
     union = len(sa | sb)
     return len(sa & sb) / union if union else 0.0
+
+
+def _representative_rank(article: Article, feed_url: str | None) -> tuple:
+    """クラスタの代表を選ぶソートキー。小さいほど代表にふさわしい。
+
+    is_saved > 非引用フィード由来 > タイトルが長い方 > published_at が早い方 > id が小さい方。
+    「タイトルが長い方」は dedup の優先順位に足したもの。Yahoo!ニュースのトピックス
+    見出しは切り詰められるので、長い方＝元媒体の記事を残す方が読む価値が高い
+    """
+    from app.services.deduplicator import is_quote_feed
+
+    return (
+        not article.is_saved,
+        is_quote_feed(feed_url),
+        -len(article.title or ""),
+        article.published_at or "",
+        article.id,
+    )
+
+
+async def cluster_stories(session: AsyncSession) -> dict:
+    """同一ニュースの別媒体版を検出し、代表以外に dismissed_at を立てる。
+
+    候補は直近 CANDIDATE_HOURS に取り込まれた記事、突き合わせ相手は直近
+    WINDOW_HOURS の記事。どちらも未読・未 dismiss・非 UGC に限る。保管済みは
+    代表になれるよう突き合わせ対象には含めるが、非表示にはしない。
+    候補を新規取得分に絞ってあるので、ユーザーが手で解除した記事を再び
+    非表示にすることがない。
+
+    突き合わせは各候補をプール全体（自分より id が小さい記事だけでなく）と比較する。
+    id 順と fetched_at 順は通常一致するが保証はなく、一致しない組み合わせを
+    `pool[:index]` のような片側走査だと取りこぼす（controller ruling 2）。
+    """
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(hours=WINDOW_HOURS)).isoformat()
+    candidate_start = (now - timedelta(hours=CANDIDATE_HOURS)).isoformat()
+
+    rows = (
+        await session.execute(
+            select(Article, Feed.url.label("feed_url"))
+            .join(Feed, Article.feed_id == Feed.id)
+            .where(
+                Article.dismissed_at.is_(None),
+                Article.is_read == False,  # noqa: E712
+                Article.fetched_at >= window_start,
+            )
+            .order_by(Article.id)
+        )
+    ).all()
+
+    pool = [(article, feed_url) for article, feed_url in rows if not is_ugc_host(article.url)]
+    dismissed_ids: set[int] = set()
+    clusters = 0
+
+    for article, feed_url in pool:
+        if article.fetched_at < candidate_start or article.id in dismissed_ids:
+            continue
+        for other, other_feed_url in pool:
+            if other.id == article.id or other.id in dismissed_ids:
+                continue
+            if other.feed_id == article.feed_id:
+                continue
+            if title_similarity(article.title, other.title) < SIMILARITY_THRESHOLD:
+                continue
+
+            pair = [(article, feed_url), (other, other_feed_url)]
+            pair.sort(key=lambda item: _representative_rank(item[0], item[1]))
+            loser = pair[1][0]
+            # 保管済みは常に守る（routers/articles.py の dismiss と同じ方針）。
+            # 代表選択で保管済みが先頭に来るので、ここに落ちるのは両方保管済みのときだけ
+            if loser.is_saved:
+                continue
+            loser.dismissed_at = now.isoformat()
+            dismissed_ids.add(loser.id)
+            clusters += 1
+            logger.info(
+                "Same-story cluster: kept %r, dismissed %r", pair[0][0].title, loser.title
+            )
+            if loser.id == article.id:
+                break
+
+    if dismissed_ids:
+        await session.commit()
+    return {"clusters": clusters, "dismissed": len(dismissed_ids)}
