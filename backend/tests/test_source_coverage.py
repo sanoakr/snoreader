@@ -150,3 +150,140 @@ async def test_subscribed_hosts_keeps_subdomains_separate(client: AsyncClient) -
 
     assert hosts == {"itmedia.co.jp", "monoist.itmedia.co.jp"}
     assert "nlab.itmedia.co.jp" not in hosts
+
+
+_RSS_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>quote</title>
+{items}
+</channel></rss>"""
+
+
+def _rss(urls: list[str]) -> str:
+    items = "\n".join(
+        f"<item><title>t{i}</title><link>{u}</link><guid>{u}</guid></item>"
+        for i, u in enumerate(urls)
+    )
+    return _RSS_TEMPLATE.format(items=items)
+
+
+class _FakeResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+def _patch_http(monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    import httpx
+
+    async def _get(self, url, *args, **kwargs):  # noqa: ANN001, ANN202
+        return _FakeResponse(body)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _get)
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_subscribed_hosts_in_quote_feed(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Article
+    from app.services.feed_fetcher import fetch_feed
+
+    async with async_session() as session:
+        zenn = await _make_feed(session, "https://zenn.dev/feed")
+        await _make_articles(session, zenn.id, "https://zenn.dev/u/articles", 10)
+        quote = await _make_feed(session, "https://b.hatena.ne.jp/hotentry.rss")
+        await session.commit()
+        quote_id = quote.id
+
+    _patch_http(
+        monkeypatch,
+        _rss(
+            [
+                "https://zenn.dev/other/articles/aaa",  # 購読済みホスト -> スキップ
+                "https://togetter.com/li/1",  # 購読していない -> 取り込む
+            ]
+        ),
+    )
+
+    async with async_session() as session:
+        from app.models import Feed
+
+        feed = await session.get(Feed, quote_id)
+        new_count = await fetch_feed(feed, session)
+
+    assert new_count == 1
+
+    async with async_session() as session:
+        urls = (
+            await session.execute(select(Article.url).where(Article.feed_id == quote_id))
+        ).scalars().all()
+    assert urls == ["https://togetter.com/li/1"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_keeps_subscribed_hosts_in_non_quote_feed(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """スキップは引用フィードだけの挙動。購読フィード自身は当然そのまま取り込む。"""
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Article
+    from app.services.feed_fetcher import fetch_feed
+
+    async with async_session() as session:
+        zenn = await _make_feed(session, "https://zenn.dev/feed")
+        await _make_articles(session, zenn.id, "https://zenn.dev/u/articles", 10)
+        await session.commit()
+        zenn_id = zenn.id
+
+    _patch_http(monkeypatch, _rss(["https://zenn.dev/new/articles/bbb"]))
+
+    async with async_session() as session:
+        from app.models import Feed
+
+        feed = await session.get(Feed, zenn_id)
+        assert await fetch_feed(feed, session) == 1
+
+    async with async_session() as session:
+        count = len(
+            (
+                await session.execute(
+                    select(Article.id).where(Article.url == "https://zenn.dev/new/articles/bbb")
+                )
+            ).scalars().all()
+        )
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_skip_can_be_disabled_by_setting(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import config as config_module
+    from app.database import async_session
+    from app.services.feed_fetcher import fetch_feed
+
+    monkeypatch.setattr(
+        config_module.settings, "skip_subscribed_hosts_in_quote_feeds", False
+    )
+
+    async with async_session() as session:
+        zenn = await _make_feed(session, "https://zenn.dev/feed")
+        await _make_articles(session, zenn.id, "https://zenn.dev/u/articles", 10)
+        quote = await _make_feed(session, "https://b.hatena.ne.jp/hotentry.rss")
+        await session.commit()
+        quote_id = quote.id
+
+    _patch_http(monkeypatch, _rss(["https://zenn.dev/other/articles/aaa"]))
+
+    async with async_session() as session:
+        from app.models import Feed
+
+        feed = await session.get(Feed, quote_id)
+        assert await fetch_feed(feed, session) == 1

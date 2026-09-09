@@ -11,8 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import config
 from app.models import Article, ExcludePattern, Feed
-from app.services.deduplicator import dedup_articles, normalize_url
+from app.services.deduplicator import dedup_articles, is_quote_feed, normalize_url, normalized_host
 from app.services.url_filters import is_excluded
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,16 @@ async def fetch_feed(feed: Feed, session: AsyncSession) -> int:
         (await session.execute(select(ExcludePattern.pattern))).scalars()
     )
 
+    # 引用フィード（はてブ）のときだけ、すでに購読しているサイトの記事を落とす。
+    # 1 フェッチにつき 1 回だけ算出する（全記事の URL を読むので毎エントリは重い）
+    skip_hosts: set[str] = set()
+    if config.settings.skip_subscribed_hosts_in_quote_feeds and is_quote_feed(feed.url):
+        from app.services.source_coverage import subscribed_hosts
+
+        skip_hosts = await subscribed_hosts(session)
+
     new_count = 0
+    skipped_subscribed = 0
     now = datetime.now(timezone.utc).isoformat()
 
     for entry in parsed.entries:
@@ -118,6 +128,9 @@ async def fetch_feed(feed: Feed, session: AsyncSession) -> int:
         if not guid or not url:
             continue
         if is_excluded(url, exclude_patterns):
+            continue
+        if skip_hosts and normalized_host(url) in skip_hosts:
+            skipped_subscribed += 1
             continue
 
         stmt = sqlite_upsert(Article).values(
@@ -142,7 +155,12 @@ async def fetch_feed(feed: Feed, session: AsyncSession) -> int:
     feed.last_error = None
     await session.commit()
 
-    logger.info("Fetched %s: %d new articles", feed.url, new_count)
+    logger.info(
+        "Fetched %s: %d new articles (%d skipped as already-subscribed hosts)",
+        feed.url,
+        new_count,
+        skipped_subscribed,
+    )
     return new_count
 
 

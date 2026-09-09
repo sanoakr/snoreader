@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite+aiosqlite:///{Path(__file__).resolve().parent.parent.parent / 'data' / 'snoreader.db'}"
     feed_fetch_interval_minutes: int = 60
     article_retention_days: int = 60
+    # 引用フィード（はてなブックマーク）から、すでに購読しているサイトの記事を
+    # 取り込まない。購読フィードはトレンド/人気/主要といった部分集合なので、
+    # はてブにしか出ていない記事も一緒に落ちる（2026-09-10 実測で 60 日 408 件）。
+    # 承知の上での既定値。False にすると以降のフェッチから元に戻る
+    skip_subscribed_hosts_in_quote_feeds: bool = True
     # 葉ジャンルの未読上限。超えると分割案を作る（一括 triage で確認できる上限）
     genre_unread_limit: int = 50
     host: str = "0.0.0.0"
