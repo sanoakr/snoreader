@@ -353,8 +353,10 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
               {article.title}
             </a>
           </h1>
-          <div className="flex items-center gap-3 text-sm text-gray-500">
-            {article.feed_title && <span>{article.feed_title}</span>}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+            {article.feed_title && (
+              <span className="font-medium text-gray-700 dark:text-gray-300">{article.feed_title}</span>
+            )}
             {article.author && <span>by {article.author}</span>}
             {publishedDate && <span>{publishedDate}</span>}
           </div>

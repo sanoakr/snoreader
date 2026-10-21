@@ -571,7 +571,12 @@ async def update_article(
 
     await session.commit()
     await session.refresh(article)
-    return ArticleOut.model_validate(article)
+    out = ArticleOut.model_validate(article)
+    # フロントは応答を既存キャッシュへ {...old, ...result} でマージするため、
+    # feed_title が null のままだとリーダーのフィード名が既読化・保存のたびに消える。
+    feed = await session.get(Feed, article.feed_id)
+    out.feed_title = feed.title if feed else None
+    return out
 
 
 @router.post("/articles/auto-tag-saved", response_model=dict)
