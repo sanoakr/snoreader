@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAiStatus, useArticles, useDismiss, useExtractAction, useExtractFailed, useGenreCounts, useMarkAllRead, useSearchArticles, useUndismiss, useUpdateArticle } from '../../hooks/useArticles';
 import { useTags, useBulkDeleteTags } from '../../hooks/useTags';
-import { useRefreshFeed } from '../../hooks/useFeeds';
 import type { Article, ArticleFilters } from '../../types';
 import { getArticle } from '../../api/client';
 import { ArticleCard } from './ArticleCard';
@@ -72,11 +71,18 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     hasNextPage,
     isFetchingNextPage,
     isLoading: isArticlesLoading,
-    refetch: refetchArticles,
   } = useArticles(
     isExtractFailedView ? { ...filters, extract_failed: undefined } : filters,
     isUnreadView,
   );
+
+  // ページ全体を再読み込みする（r キー・モバイルのプルダウン共通）。
+  // 再読み込み後は selectedId が空になり、モバイルでは自動選択もしないため記事一覧が出る。
+  // 今のビュー（filters）だけは App.tsx が sessionStorage から復元できるよう退避しておく
+  const reloadPage = useCallback(() => {
+    try { sessionStorage.setItem('snoreader_nav', JSON.stringify(filters)); } catch { /* ignore */ }
+    window.location.reload();
+  }, [filters]);
 
   const PULL_THRESHOLD = 60;
   const pullStartYRef = useRef<number | null>(null);
@@ -101,11 +107,9 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     setPullDistance(0);
     if (dy >= PULL_THRESHOLD) {
       setIsPulling(true);
-      refetchArticles().finally(() => setIsPulling(false));
+      reloadPage();
     }
   };
-
-  const refreshFeed = useRefreshFeed();
 
   const extractFailed = useExtractFailed();
   const extractAct = useExtractAction();
@@ -288,10 +292,6 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     setSelectedId(id);
   }, [displayArticles, selectedId]);
 
-  const selectedArticleFeedId = selectedId != null
-    ? displayArticles.find(a => a.id === selectedId)?.feed_id
-    : undefined;
-
   // モバイル記事リーダーのプルリフレッシュ
   // スクロールコンテナ自身にネイティブ touch リスナーを張る方式が iOS Safari で最も確実。
   const readerScrollRef = useRef<HTMLDivElement | null>(null);
@@ -299,19 +299,6 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   const [isReaderPulling, setIsReaderPulling] = useState(false);
   const [readerPullDistance, setReaderPullDistance] = useState(0);
   const isReaderPullingRef = useRef(false);
-
-  const handleReaderRefresh = useCallback(async () => {
-    try {
-      if (selectedArticleFeedId != null) {
-        await refreshFeed.mutateAsync(selectedArticleFeedId);
-      } else {
-        await refetchArticles();
-      }
-    } catch {
-      await refetchArticles().catch(() => {});
-    }
-    setSelectedId(null);
-  }, [selectedArticleFeedId, refreshFeed, refetchArticles]);
 
   // selectedId 変化のたびに DOM を探してネイティブリスナーを付ける。
   // ArticleReader 側の onTouchStart/End と共存できるよう passive かつ非排他で動かす。
@@ -342,10 +329,8 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       if (dy >= READER_PULL_THRESHOLD && Math.abs(dy) >= Math.abs(dx) && !isReaderPullingRef.current) {
         isReaderPullingRef.current = true;
         setIsReaderPulling(true);
-        handleReaderRefresh().finally(() => {
-          isReaderPullingRef.current = false;
-          setIsReaderPulling(false);
-        });
+        // ページごと読み込み直すので、フラグは戻さない（インジケータは遷移まで出し続ける）
+        reloadPage();
       }
     };
 
@@ -381,7 +366,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
         el.removeEventListener('touchcancel', onEnd);
       }
     };
-  }, [selectedId, handleReaderRefresh]);
+  }, [selectedId, reloadPage]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -427,12 +412,11 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
       }
       case 'r': {
         e.preventDefault();
-        try { sessionStorage.setItem('snoreader_nav', JSON.stringify(filters)); } catch { /* ignore */ }
-        window.location.reload();
+        reloadPage();
         break;
       }
     }
-  }, [displayArticles, selectedId, updateArticle, queryClient, filters]);
+  }, [displayArticles, selectedId, updateArticle, queryClient, reloadPage]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
