@@ -105,6 +105,8 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
   const containerRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
+  // ピンチ（2 本指）操作を含むジェスチャは前後記事ナビゲーションにしない
+  const multiTouchRef = useRef(false);
   // Stable refs so the swipe effect only attaches once; always reads latest callbacks
   const onNextRef = useRef(onNext);
   const onPrevRef = useRef(onPrev);
@@ -187,10 +189,20 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
 
   // 水平スワイプで前後記事ナビゲーション (モバイル)
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 1) multiTouchRef.current = true;
+    else multiTouchRef.current = false;
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
   };
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 1) multiTouchRef.current = true;
+  };
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    // 2 本指が触れた時点で無効。最後の指が離れるまでフラグを維持する
+    if (multiTouchRef.current) {
+      if (e.touches.length === 0) multiTouchRef.current = false;
+      return;
+    }
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     const dy = e.changedTouches[0].clientY - touchStartY.current;
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy)) return;
@@ -337,6 +349,7 @@ export const ArticleReader = memo(function ArticleReader({ articleId, tagLang, a
         if (scrollRef) scrollRef.current = el;
       }}
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       data-reader-scroll
       className="h-screen overflow-y-auto overscroll-contain pt-12 md:pt-0"
