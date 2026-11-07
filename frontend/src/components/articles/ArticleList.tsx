@@ -84,28 +84,55 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     window.location.reload();
   }, [filters]);
 
-  const PULL_THRESHOLD = 60;
+  // 誤操作での更新を避けるため、十分な距離を引いた状態で一定時間保持して初めて「準備完了」にする
+  const PULL_THRESHOLD = 140;
+  const PULL_HOLD_MS = 800;
   const pullStartYRef = useRef<number | null>(null);
+  const pullArmedRef = useRef(false);
+  const pullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPulling, setIsPulling] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
+  const [pullArmed, setPullArmed] = useState(false);
+
+  const resetListPull = () => {
+    pullStartYRef.current = null;
+    pullArmedRef.current = false;
+    if (pullTimerRef.current) { clearTimeout(pullTimerRef.current); pullTimerRef.current = null; }
+    setPullArmed(false);
+    setPullDistance(0);
+  };
 
   const handleListTouchStart = (e: React.TouchEvent) => {
+    // 2 本指以上（ピンチ等）はプルとして扱わない
+    if (e.touches.length > 1) { resetListPull(); return; }
     if ((listRef.current?.scrollTop ?? 0) === 0) {
       pullStartYRef.current = e.touches[0].clientY;
     }
   };
   const handleListTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length > 1) { resetListPull(); return; }
     if (pullStartYRef.current === null || isPulling) return;
     const dy = e.touches[0].clientY - pullStartYRef.current;
-    setPullDistance(dy > 0 ? Math.min(dy, PULL_THRESHOLD * 1.5) : 0);
-  };
-  const handleListTouchEnd = (e: React.TouchEvent) => {
-    const dy = pullStartYRef.current !== null
-      ? e.changedTouches[0].clientY - pullStartYRef.current
-      : 0;
-    pullStartYRef.current = null;
-    setPullDistance(0);
+    setPullDistance(dy > 0 ? Math.min(dy, PULL_THRESHOLD * 1.2) : 0);
     if (dy >= PULL_THRESHOLD) {
+      if (!pullArmedRef.current && pullTimerRef.current === null) {
+        pullTimerRef.current = setTimeout(() => {
+          pullTimerRef.current = null;
+          pullArmedRef.current = true;
+          setPullArmed(true);
+        }, PULL_HOLD_MS);
+      }
+    } else {
+      // 閾値を割ったらホールドをやり直し
+      if (pullTimerRef.current) { clearTimeout(pullTimerRef.current); pullTimerRef.current = null; }
+      pullArmedRef.current = false;
+      setPullArmed(false);
+    }
+  };
+  const handleListTouchEnd = () => {
+    const armed = pullArmedRef.current;
+    resetListPull();
+    if (armed) {
       setIsPulling(true);
       reloadPage();
     }
@@ -295,9 +322,11 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
   // モバイル記事リーダーのプルリフレッシュ
   // スクロールコンテナ自身にネイティブ touch リスナーを張る方式が iOS Safari で最も確実。
   const readerScrollRef = useRef<HTMLDivElement | null>(null);
-  const READER_PULL_THRESHOLD = 60;
+  const READER_PULL_THRESHOLD = 140;
+  const READER_PULL_HOLD_MS = 800;
   const [isReaderPulling, setIsReaderPulling] = useState(false);
   const [readerPullDistance, setReaderPullDistance] = useState(0);
+  const [readerPullArmed, setReaderPullArmed] = useState(false);
   const isReaderPullingRef = useRef(false);
 
   // selectedId 変化のたびに DOM を探してネイティブリスナーを付ける。
@@ -308,25 +337,49 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
     let startY: number | null = null;
     let startX = 0;
     let el: HTMLElement | null = null;
+    let armed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const reset = () => {
+      startY = null;
+      armed = false;
+      if (timer) { clearTimeout(timer); timer = null; }
+      setReaderPullArmed(false);
+      setReaderPullDistance(0);
+    };
 
     const onStart = (e: TouchEvent) => {
+      // 2 本指以上（ピンチ拡大縮小）はプルとして扱わない
+      if (e.touches.length > 1) { reset(); return; }
       if (!el || el.scrollTop > 1) { startY = null; return; }
       startY = e.touches[0].clientY;
       startX = e.touches[0].clientX;
     };
     const onMove = (e: TouchEvent) => {
+      if (e.touches.length > 1) { reset(); return; }
       if (startY === null || isReaderPullingRef.current) return;
       const dy = e.touches[0].clientY - startY;
       const dx = e.touches[0].clientX - startX;
-      if (Math.abs(dx) > Math.abs(dy)) { setReaderPullDistance(0); return; }
-      setReaderPullDistance(dy > 0 ? Math.min(dy, READER_PULL_THRESHOLD * 1.5) : 0);
+      if (Math.abs(dx) > Math.abs(dy)) { reset(); return; }
+      setReaderPullDistance(dy > 0 ? Math.min(dy, READER_PULL_THRESHOLD * 1.2) : 0);
+      if (dy >= READER_PULL_THRESHOLD) {
+        if (!armed && timer === null) {
+          timer = setTimeout(() => {
+            timer = null;
+            armed = true;
+            setReaderPullArmed(true);
+          }, READER_PULL_HOLD_MS);
+        }
+      } else {
+        if (timer) { clearTimeout(timer); timer = null; }
+        armed = false;
+        setReaderPullArmed(false);
+      }
     };
-    const onEnd = (e: TouchEvent) => {
-      const dy = startY !== null ? e.changedTouches[0].clientY - startY : 0;
-      const dx = startY !== null ? e.changedTouches[0].clientX - startX : 0;
-      startY = null;
-      setReaderPullDistance(0);
-      if (dy >= READER_PULL_THRESHOLD && Math.abs(dy) >= Math.abs(dx) && !isReaderPullingRef.current) {
+    const onEnd = () => {
+      const fire = armed;
+      reset();
+      if (fire && !isReaderPullingRef.current) {
         isReaderPullingRef.current = true;
         setIsReaderPulling(true);
         // ページごと読み込み直すので、フラグは戻さない（インジケータは遷移まで出し続ける）
@@ -641,9 +694,11 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
         >
           {isPulling
             ? <Spinner size="sm" />
-            : pullDistance >= PULL_THRESHOLD
+            : pullArmed
               ? <span className="text-xs text-blue-400">↑ 離して更新</span>
-              : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
+              : pullDistance >= PULL_THRESHOLD
+                ? <span className="text-xs text-gray-400">そのまま保持…</span>
+                : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
           }
         </div>
 
@@ -654,6 +709,7 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
           onTouchStart={handleListTouchStart}
           onTouchMove={handleListTouchMove}
           onTouchEnd={handleListTouchEnd}
+          onTouchCancel={handleListTouchEnd}
         >
           {isLoading && <div className="flex justify-center p-6"><Spinner /></div>}
           {!isLoading && articles.length === 0 && (
@@ -758,9 +814,11 @@ export function ArticleList({ filters, onFilterChange, tagLang, onTotalChange }:
             >
               {isReaderPulling
                 ? <Spinner />
-                : readerPullDistance >= READER_PULL_THRESHOLD
+                : readerPullArmed
                   ? <span className="text-xs text-blue-400">↑ 離して更新</span>
-                  : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
+                  : readerPullDistance >= READER_PULL_THRESHOLD
+                    ? <span className="text-xs text-gray-400">そのまま保持…</span>
+                    : <span className="text-xs text-gray-400">↓ 引っ張って更新</span>
               }
             </div>
             <ArticleReader
