@@ -9,7 +9,7 @@ A self-hosted RSS reader — access from multiple devices on your LAN via browse
 - RSS / Atom feed subscription with automatic refresh (60-minute interval, parallel fetching)
 - 3-pane layout on desktop, single-pane reader with swipe / floating prev-next on mobile
 - Mark articles read / unread (toggle) or saved
-- Full-text search via SQLite FTS5
+- Full-text search via SQLite FTS5, results sorted newest first
 - Article content extraction in reader mode (trafilatura, charset-aware for Shift_JIS / EUC-JP sites)
 - Stable reader layout — extraction fills in every body image's `width`/`height` (from the page's own markup, falling back to reading the dimensions out of the image header over a ranged request — only for public hosts on ports 80/443, with redirects not followed, since an `<img src>` in fetched page content is attacker-controlled and must not be able to aim requests at loopback or LAN addresses), so the browser reserves the space before the image arrives and the reading position never shifts mid-article. Large GIFs (≥ ~200×200) are not auto-loaded: a placeholder box of exactly the image's own size waits for a tap, which keeps continuous GIF decoding — a cause of full-screen repaint flicker on iOS — off the page. Icon-sized GIFs load normally, and 1×1 beacons / lazy-load spacers (Togetter and Posfie emit dozens per page) are dropped outright once their size is known
 - Bilingual tagging — English/Japanese display toggle, manual input with auto-translation
