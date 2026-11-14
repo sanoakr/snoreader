@@ -1231,6 +1231,12 @@ async def search_articles(
         count_stmt = count_stmt.where(Article.is_saved == is_saved)
 
     total = (await session.execute(count_stmt)).scalar() or 0
+    # 新しい記事から順に並べる。公開日が無い記事は fetched_at で代替し
+    # （article_cleanup と同じ扱い）、同時刻は id 降順で順序を安定させる。
+    stmt = stmt.order_by(
+        func.coalesce(Article.published_at, Article.fetched_at).desc(),
+        Article.id.desc(),
+    )
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
 

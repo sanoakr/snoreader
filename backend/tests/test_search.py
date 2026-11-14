@@ -130,3 +130,34 @@ async def test_search_special_chars_no_500(client: AsyncClient) -> None:
 async def test_search_empty_query_rejected(client: AsyncClient) -> None:
     res = await client.get("/api/search", params={"q": ""})
     assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_search_results_newest_first(client: AsyncClient) -> None:
+    """検索結果は新しい記事から順に並ぶ（published_at 降順、未設定は fetched_at で代替）。"""
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Article, Feed
+
+    async with async_session() as session:
+        feed_id = (await session.execute(select(Feed.id))).scalars().first()
+        # 挿入順は古い→新しい→中間、と意図的にずらす
+        session.add_all(
+            [
+                Article(feed_id=feed_id, guid="s-old", url="https://example.com/s1",
+                        title="並び順 古い", published_at=datetime(2026, 1, 1)),
+                Article(feed_id=feed_id, guid="s-new", url="https://example.com/s2",
+                        title="並び順 新しい", published_at=datetime(2026, 3, 1)),
+                Article(feed_id=feed_id, guid="s-mid", url="https://example.com/s3",
+                        title="並び順 中間", published_at=datetime(2026, 2, 1)),
+            ]
+        )
+        await session.commit()
+
+    res = await client.get("/api/search", params={"q": "並び順"})
+    assert res.status_code == 200
+    titles = [item["title"] for item in res.json()["items"]]
+    assert titles == ["並び順 新しい", "並び順 中間", "並び順 古い"]
