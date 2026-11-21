@@ -92,7 +92,7 @@ async def summarize_and_tag(
             "role": "user",
             "content": (
                 f"[{uid}] Process only this article."
-                f"{existing_str}\n\nTitle: {title}\n\n{text[:3000]}"
+                f"{existing_str}\n\nTitle: {title}\n\n{summary_rules.clip_for_llm(text, summary_rules.SUMMARY_INPUT_CHARS)}"
             ),
         },
     ]

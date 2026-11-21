@@ -30,3 +30,21 @@ def test_empty_input_returns_none():
 
 def test_all_lines_rejected_returns_none():
     assert finalize_bullets(["・ai|エーアイ"]) is None
+
+
+from app.ai.summary_rules import CLIP_SEPARATOR, clip_for_llm  # noqa: E402
+
+
+def test_clip_returns_text_unchanged_at_exact_limit():
+    text = "あ" * 100
+    assert clip_for_llm(text, 100) == text
+
+
+def test_clip_keeps_head_and_tail_when_over_limit():
+    text = "H" * 200 + "M" * 100 + "T" * 200  # 500 字
+    out = clip_for_llm(text, 300)
+    assert out.startswith("H" * 200)  # 先頭 limit*2//3 = 200
+    assert out.endswith("T" * 100)  # 末尾 limit//3 = 100
+    assert CLIP_SEPARATOR in out
+    assert "M" not in out
+    assert len(out) == 300 + len(CLIP_SEPARATOR)
