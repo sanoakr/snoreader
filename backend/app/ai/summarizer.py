@@ -33,7 +33,7 @@ def _clean_summary(raw: str) -> str | None:
 
 async def summarize_article(title: str, text: str, priority: int | None = None) -> str | None:
     """Generate a summary for an article. Returns None if LLM is unavailable."""
-    content = text[:3000]
+    content = summary_rules.prepare_for_llm(text, summary_rules.SUMMARY_INPUT_CHARS)
     # Unique per-article hash prefix prevents mlx-lm KV cache reuse across articles
     uid = hashlib.md5(f"sum:{title}".encode()).hexdigest()[:8]
     messages = [

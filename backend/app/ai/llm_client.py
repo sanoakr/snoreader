@@ -130,6 +130,14 @@ async def chat_completion(
                 )
                 resp.raise_for_status()
                 data = resp.json()
+            usage = data.get("usage") or {}
+            # 入力がサーバーの context を超えると黙って先頭側が捨てられる。
+            # 送った長さより prompt_tokens が明らかに少なければ、その兆候。
+            logger.debug(
+                "LLM usage: prompt_tokens=%s completion_tokens=%s",
+                usage.get("prompt_tokens"),
+                usage.get("completion_tokens"),
+            )
             content = data["choices"][0]["message"]["content"]
             if content is None:
                 return None

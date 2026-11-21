@@ -1,5 +1,7 @@
 """Tests for summarizer._clean_summary."""
 
+import pytest
+
 from app.ai.summarizer import _clean_summary
 from app.ai.summary_rules import MAX_SUMMARY_BULLETS
 
@@ -29,3 +31,36 @@ def test_clean_summary_ignores_non_bullet_lines():
 
 def test_clean_summary_returns_none_when_no_bullets():
     assert _clean_summary("no bullets here") is None
+
+
+@pytest.mark.asyncio
+async def test_summarize_article_passes_article_tail(monkeypatch):
+    """12,000 字を超える本文でも、末尾（結論）が LLM への入力に残ること。"""
+    from app.ai import summarizer
+
+    captured: dict = {}
+
+    async def _fake_chat(messages, **kwargs):
+        captured["user"] = messages[-1]["content"]
+        return "・要約"
+
+    monkeypatch.setattr(summarizer, "chat_completion", _fake_chat)
+    text = "あ" * 20_000 + "結論マーカー"
+    await summarizer.summarize_article("題", text)
+    assert "結論マーカー" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_summarize_article_strips_html_before_sending(monkeypatch):
+    from app.ai import summarizer
+
+    captured: dict = {}
+
+    async def _fake_chat(messages, **kwargs):
+        captured["user"] = messages[-1]["content"]
+        return "・要約"
+
+    monkeypatch.setattr(summarizer, "chat_completion", _fake_chat)
+    await summarizer.summarize_article("題", '<p class="x">本文です</p><img src="https://e.com/a.png">')
+    assert "本文です" in captured["user"]
+    assert "<p" not in captured["user"] and "<img" not in captured["user"]
