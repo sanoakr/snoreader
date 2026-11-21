@@ -94,6 +94,7 @@ mlx_lm.server --model prism-ml/Ternary-Bonsai-8B-mlx-2bit --port 8880
 
 When the LLM server is available, SnoReader:
 - Auto-generates Japanese bullet-point summaries for articles (background job, priority: Saved > Unread > Read)
+- Feeds the model the article body as plain text (HTML stripped) up to 12,000 characters; longer articles keep their head and tail so the conclusion is not cut off
 - Suggests tags based on the AI summary
 - Auto-translates manually entered Japanese tags into English
 - Enables a chat panel at the bottom of the reader pane for free-form questions about the current article (session-only history, cleared on article switch)
