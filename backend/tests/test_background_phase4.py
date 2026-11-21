@@ -37,6 +37,7 @@ async def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[N
 
     background_processor._llm_skip_until.clear()
     background_processor._reference_skip_until.clear()
+    background_processor._reference_failures.clear()
 
     yield
 
@@ -313,3 +314,107 @@ async def test_phase4_handles_article_deleted_meanwhile(
 
     assert await background_processor._process_phase4_one() is True
     assert await _get(article_id) is None
+
+
+@pytest.mark.asyncio
+async def test_phase4_newline_only_content_is_not_selected_forever(
+    db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SQLite の trim は半角スペースしか落とさない。改行・タブだけの本文を「本文あり」と
+    みなして、抜粋由来の記事を毎周期作り直し続けないこと（最終レビュー Important 1）。"""
+    from app.ai.reference_summarizer import reference_version
+    from app.config import settings
+    from app.services import background_processor
+
+    await _seed(
+        guid="a1",
+        url="https://example.com/1",
+        content="\n",
+        extract_status=None,
+        summary="抜粋です",
+        reference_summary="抜粋由来の要約",
+        reference_basis="excerpt",
+        reference_summary_version=reference_version(settings.llm_model),
+        reference_summary_at="2026-11-01T00:00:00+00:00",
+    )
+    await _seed(guid="a2", url="https://example.com/2", content="\n\n", summary="\t\n ")
+    calls = _mock_generator(monkeypatch)
+
+    assert await background_processor._process_phase4_one() is False
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_phase4_tag_only_content_falls_back_to_excerpt(
+    db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HTML を除くと空になる本文は、タイトルだけの要約を content 由来にしないこと
+    （最終レビュー Important 2）。"""
+    from app.services import background_processor
+
+    article_id = await _seed(
+        guid="a1", url="https://example.com/1", content="<p></p><img src='x'>", summary="抜粋です"
+    )
+    calls = _mock_generator(monkeypatch)
+
+    assert await background_processor._process_phase4_one() is True
+
+    assert (await _get(article_id)).reference_basis == "excerpt"
+    assert calls[0][1] == "抜粋です"
+
+
+@pytest.mark.asyncio
+async def test_phase4_tag_only_content_and_no_excerpt_is_skipped_for_a_long_time(
+    db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    from app.services import background_processor
+
+    article_id = await _seed(
+        guid="a1", url="https://example.com/1", content="<img src='x'>", summary=""
+    )
+    calls = _mock_generator(monkeypatch)
+
+    assert await background_processor._process_phase4_one() is True
+
+    assert calls == []
+    assert (await _get(article_id)).reference_summary is None
+    until = background_processor._reference_skip_until[article_id]
+    assert until - time.monotonic() > 3600  # 次の周期でまた選ばれない
+
+
+@pytest.mark.asyncio
+async def test_phase4_backoff_grows_on_repeated_failure_and_resets_on_success(
+    db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """検証に落ち続ける記事で Phase 4 が先頭に張り付かないこと（最終レビュー Important 3）。"""
+    import time
+
+    from app.services import background_processor
+
+    article_id = await _seed(guid="a1", url="https://example.com/1", content="本文")
+    calls = _mock_generator(monkeypatch, result=None)
+
+    delays: list[float] = []
+    for _ in range(3):
+        background_processor._reference_skip_until[article_id] = 0.0  # 強制的に再選択させる
+        await background_processor._process_phase4_one()
+        delays.append(background_processor._reference_skip_until[article_id] - time.monotonic())
+
+    assert delays[1] > delays[0] * 1.5
+    assert delays[2] > delays[1] * 1.5
+
+    # 成功したら失敗回数は忘れる
+    calls.clear()
+    monkeypatch.setattr(
+        "app.ai.reference_summarizer.generate_reference_summary",
+        lambda *a, **k: _ok(),
+    )
+    background_processor._reference_skip_until[article_id] = 0.0
+    await background_processor._process_phase4_one()
+    assert article_id not in background_processor._reference_failures
+
+
+async def _ok() -> str:
+    return REFERENCE_TEXT

@@ -38,6 +38,10 @@ _extract_skip_until: dict[int, float] = {}
 _llm_skip_until: dict[int, float] = {}
 # Phase 4（参照用要約）専用。他フェーズの失敗と互いに止め合わない。
 _reference_skip_until: dict[int, float] = {}
+# 検証に落ち続ける記事で Phase 4 が先頭に張り付かないよう、失敗のたびにバックオフを倍にする。
+_reference_failures: dict[int, int] = {}
+_REFERENCE_MAX_SKIP = 86400  # バックオフの上限（秒）= 1 日。入力が使えない記事にも使う
+_SQL_WHITESPACE = " \t\r\n"  # SQLite の trim は既定だと半角スペースしか落とさない
 # 複数の Phase 1 ループが同じ記事を同時に取得しないための in-flight リスト。
 _phase1_in_flight: list[int] = []
 
@@ -314,6 +318,14 @@ async def _process_phase3_one() -> bool:
     return True
 
 
+def _back_off_reference(article_id: int) -> None:
+    """失敗した記事を _SKIP_DURATION から倍々で（上限 _REFERENCE_MAX_SKIP）飛ばす。"""
+    failures = _reference_failures.get(article_id, 0) + 1
+    _reference_failures[article_id] = failures
+    delay = min(_SKIP_DURATION * 2 ** (failures - 1), _REFERENCE_MAX_SKIP)
+    _reference_skip_until[article_id] = time.monotonic() + delay
+
+
 async def _process_phase4_one() -> bool:
     """Phase 4: Saved 記事の参照用要約（kioku が引くための要約）を 1 件作る。
 
@@ -328,6 +340,7 @@ async def _process_phase4_one() -> bool:
         generate_reference_summary,
         reference_version,
     )
+    from app.ai.summary_rules import html_to_text
     from app.ai.task_queue import PRIORITY_BACKGROUND
     from app.config import settings
     from app.database import async_session
@@ -339,9 +352,11 @@ async def _process_phase4_one() -> bool:
     has_content = and_(
         Article.extract_status.is_(None),
         Article.content.isnot(None),
-        func.trim(Article.content) != "",
+        func.trim(Article.content, _SQL_WHITESPACE) != "",
     )
-    has_excerpt = and_(Article.summary.isnot(None), func.trim(Article.summary) != "")
+    has_excerpt = and_(
+        Article.summary.isnot(None), func.trim(Article.summary, _SQL_WHITESPACE) != ""
+    )
     stages = (
         Article.reference_summary.is_(None),
         and_(Article.reference_basis == "excerpt", has_content),
@@ -371,10 +386,19 @@ async def _process_phase4_one() -> bool:
         article_id = article.id
         title = article.title
         published_at = article.published_at
-        if article.extract_status is None and (article.content or "").strip():
+        # SQL 側は「空白だけ」までしか弾けない。タグだけの本文（<p></p> や <img> のみ）は
+        # HTML を除いたあとで空になるので、ここで判定してタイトルだけの要約を作らない。
+        content_text = (
+            html_to_text(article.content or "") if article.extract_status is None else ""
+        )
+        excerpt_text = html_to_text(article.summary or "")
+        if content_text:
             basis, text = "content", article.content
+        elif excerpt_text:
+            basis, text = "excerpt", article.summary
         else:
-            basis, text = "excerpt", article.summary or ""
+            _reference_skip_until[article.id] = time.monotonic() + _REFERENCE_MAX_SKIP
+            return True
 
     try:
         reference = await generate_reference_summary(
@@ -382,11 +406,11 @@ async def _process_phase4_one() -> bool:
         )
     except Exception as e:
         logger.warning("LLM call failed (phase 4, article %d): %s", article_id, e)
-        _reference_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        _back_off_reference(article_id)
         return True
 
     if not reference:
-        _reference_skip_until[article_id] = time.monotonic() + _SKIP_DURATION
+        _back_off_reference(article_id)
         return True
 
     async with async_session() as session:
@@ -400,6 +424,7 @@ async def _process_phase4_one() -> bool:
         article.reference_summary_version = reference_version(settings.llm_model)
         article.reference_basis = basis
         await session.commit()
+    _reference_failures.pop(article_id, None)
 
     logger.debug("Phase4 processed article %d: %s", article_id, title[:50])
     return True
