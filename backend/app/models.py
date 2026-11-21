@@ -75,6 +75,12 @@ class Article(Base):
     genre: Mapped[str | None] = mapped_column(String, nullable=True)
     # 一覧から外した日時。is_read は変えないので article_cleanup の削除対象にならない
     dismissed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    # kioku が検索で引くための参照用要約（Saved の記事のみ生成）。人が読む ai_summary とは別物。
+    # null = 未生成。version は "<model>/ref-v<N>"、basis は "content"（本文から）か "excerpt"（フィード抜粋から）
+    reference_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_summary_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    reference_summary_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    reference_basis: Mapped[str | None] = mapped_column(String, nullable=True)
 
     feed: Mapped["Feed"] = relationship(back_populates="articles")
     tags: Mapped[list["Tag"]] = relationship(secondary="article_tags", back_populates="articles")
