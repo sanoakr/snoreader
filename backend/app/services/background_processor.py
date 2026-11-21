@@ -4,7 +4,8 @@ Replaces the APScheduler-based _summarize_job. Runs as persistent asyncio tasks:
 one Phase 0 (extraction) loop, _PHASE1_WORKERS concurrent Phase 1 (summary+tags)
 loops on the task_queue "bulk" lane, one Phase 2 (tag backfill) loop on the
 "reserved" lane shared with foreground requests, and one Phase 3 (chat question
-suggestions) loop back on the "bulk" lane at PRIORITY_IDLE — see app/ai/task_queue.py
+suggestions) loop back on the "bulk" lane at PRIORITY_IDLE, and one Phase 4 (reference
+summaries of Saved articles for kioku) loop on the "reserved" lane — see app/ai/task_queue.py
 for why this split exists (slab-llm's Ollama backend handles a couple of concurrent
 chat completions well but foreground responsiveness still needs a guaranteed-free lane).
 
@@ -16,8 +17,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,12 @@ _processor_tasks: list[asyncio.Task[None]] = []
 # 永久にスタックしてしまう問題があった。
 _extract_skip_until: dict[int, float] = {}
 _llm_skip_until: dict[int, float] = {}
+# Phase 4（参照用要約）専用。他フェーズの失敗と互いに止め合わない。
+_reference_skip_until: dict[int, float] = {}
+# 検証に落ち続ける記事で Phase 4 が先頭に張り付かないよう、失敗のたびにバックオフを倍にする。
+_reference_failures: dict[int, int] = {}
+_REFERENCE_MAX_SKIP = 86400  # バックオフの上限（秒）= 1 日。入力が使えない記事にも使う
+_SQL_WHITESPACE = " \t\r\n"  # SQLite の trim は既定だと半角スペースしか落とさない
 # 複数の Phase 1 ループが同じ記事を同時に取得しないための in-flight リスト。
 _phase1_in_flight: list[int] = []
 
@@ -310,6 +318,118 @@ async def _process_phase3_one() -> bool:
     return True
 
 
+def _back_off_reference(article_id: int) -> None:
+    """失敗した記事を _SKIP_DURATION から倍々で（上限 _REFERENCE_MAX_SKIP）飛ばす。"""
+    failures = _reference_failures.get(article_id, 0) + 1
+    _reference_failures[article_id] = failures
+    delay = min(_SKIP_DURATION * 2 ** (failures - 1), _REFERENCE_MAX_SKIP)
+    _reference_skip_until[article_id] = time.monotonic() + delay
+
+
+async def _process_phase4_one() -> bool:
+    """Phase 4: Saved 記事の参照用要約（kioku が引くための要約）を 1 件作る。
+
+    対象の順（すべて Saved のみ。新しく Saved にした記事から先）:
+      1. reference_summary が未生成
+      2. 抜粋由来（excerpt）で作ったが、本文が取れるようになった記事
+      3. プロンプトの版が古い記事（モデル名の違いだけでは作り直さない）
+    入力は本文（extract_status が NULL のとき）か、なければフィードの抜粋。どちらも空なら対象外。
+    """
+    from app.ai.reference_summarizer import (
+        current_version_suffix,
+        generate_reference_summary,
+        reference_version,
+    )
+    from app.ai.summary_rules import html_to_text
+    from app.ai.task_queue import PRIORITY_BACKGROUND
+    from app.config import settings
+    from app.database import async_session
+    from app.models import Article
+
+    now = time.monotonic()
+    skip_ids = [aid for aid, until in _reference_skip_until.items() if until > now]
+
+    has_content = and_(
+        Article.extract_status.is_(None),
+        Article.content.isnot(None),
+        func.trim(Article.content, _SQL_WHITESPACE) != "",
+    )
+    has_excerpt = and_(
+        Article.summary.isnot(None), func.trim(Article.summary, _SQL_WHITESPACE) != ""
+    )
+    stages = (
+        Article.reference_summary.is_(None),
+        and_(Article.reference_basis == "excerpt", has_content),
+        and_(
+            Article.reference_summary.isnot(None),
+            or_(
+                Article.reference_summary_version.is_(None),
+                Article.reference_summary_version.not_like(f"%{current_version_suffix()}"),
+            ),
+        ),
+    )
+
+    async with async_session() as session:
+        article = None
+        for stage in stages:
+            stmt = select(Article).where(
+                Article.is_saved.is_(True), stage, or_(has_content, has_excerpt)
+            )
+            if skip_ids:
+                stmt = stmt.where(Article.id.not_in(skip_ids))
+            stmt = stmt.order_by(Article.saved_at.desc()).limit(1)
+            article = (await session.execute(stmt)).scalars().first()
+            if article:
+                break
+        if not article:
+            return False
+        article_id = article.id
+        title = article.title
+        published_at = article.published_at
+        # SQL 側は「空白だけ」までしか弾けない。タグだけの本文（<p></p> や <img> のみ）は
+        # HTML を除いたあとで空になるので、ここで判定してタイトルだけの要約を作らない。
+        content_text = (
+            html_to_text(article.content or "") if article.extract_status is None else ""
+        )
+        excerpt_text = html_to_text(article.summary or "")
+        if content_text:
+            basis, text = "content", article.content
+        elif excerpt_text:
+            basis, text = "excerpt", article.summary
+        else:
+            _reference_skip_until[article.id] = time.monotonic() + _REFERENCE_MAX_SKIP
+            return True
+
+    try:
+        reference = await generate_reference_summary(
+            title, text, published_at, priority=PRIORITY_BACKGROUND, lane="reserved"
+        )
+    except Exception as e:
+        logger.warning("LLM call failed (phase 4, article %d): %s", article_id, e)
+        _back_off_reference(article_id)
+        return True
+
+    if not reference:
+        _back_off_reference(article_id)
+        return True
+
+    async with async_session() as session:
+        article = await session.get(Article, article_id)
+        # 生成中に消えた・Saved を外された記事には書かない
+        if not article or not article.is_saved:
+            return True
+        # 記事 1 件につき UPDATE は 1 回（4 列まとめて。FTS トリガーが本文を再インデックスするため）
+        article.reference_summary = reference
+        article.reference_summary_at = datetime.now(timezone.utc).isoformat()
+        article.reference_summary_version = reference_version(settings.llm_model)
+        article.reference_basis = basis
+        await session.commit()
+    _reference_failures.pop(article_id, None)
+
+    logger.debug("Phase4 processed article %d: %s", article_id, title[:50])
+    return True
+
+
 async def _extract_loop() -> None:
     """Phase 0: content extraction. LLM-independent, runs on its own."""
     while True:
@@ -374,6 +494,23 @@ async def _phase3_loop() -> None:
             await asyncio.sleep(_SLEEP_IDLE)
 
 
+async def _phase4_loop() -> None:
+    from app.ai.llm_client import is_available
+
+    while True:
+        try:
+            if not await is_available():
+                await asyncio.sleep(_SLEEP_IDLE * 3)
+                continue
+            if not await _process_phase4_one():
+                await asyncio.sleep(_SLEEP_IDLE)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Background processor (phase4) unexpected error: %s", e)
+            await asyncio.sleep(_SLEEP_IDLE)
+
+
 def start() -> None:
     global _processor_tasks
     loop = asyncio.get_event_loop()
@@ -385,6 +522,7 @@ def start() -> None:
         ),
         loop.create_task(_phase2_loop(), name="background-processor-phase2"),
         loop.create_task(_phase3_loop(), name="background-processor-phase3"),
+        loop.create_task(_phase4_loop(), name="background-processor-phase4"),
     ]
     logger.info("Background AI processor started (%d tasks)", len(_processor_tasks))
 

@@ -99,6 +99,13 @@ When the LLM server is available, SnoReader:
 - Auto-translates manually entered Japanese tags into English
 - Enables a chat panel at the bottom of the reader pane for free-form questions about the current article (session-only history, cleared on article switch)
 
+### Reference summaries for kioku
+
+For each **Saved** article, a background loop (Phase 4, `reserved` lane) generates a separate `reference_summary` — a 600–1,000 character summary written for *retrieval* rather than reading (one-to-two-sentence gist, 5–10 facts with names / versions / numbers / dates kept verbatim, who-claims-what, and the as-of date). It never replaces `ai_summary`.
+
+- Newest-saved first, so it is usable while the backlog is still being worked through. An article is regenerated only when the **prompt version** (`…/ref-vN`) is older, or when an excerpt-based summary can be redone from a newly extracted body — a model-name change alone does not trigger regeneration.
+- `GET /api/export/saved-articles` adds `reference_summary`, `reference_summary_at`, `reference_summary_version`, `reference_basis` (`content` = from the extracted body, `excerpt` = from the feed excerpt, so lower confidence) and `genre`. Articles without one yet return those four as `null`.
+
 ### Thinking-block stripping
 
 `llm_client.chat_completion` drops a thinking block the server left in the reply body before returning it, and returns nothing when the reply was cut off mid-thinking.
@@ -184,6 +191,7 @@ snoreader/
 │       └── ai/
 │           ├── llm_client.py     #   OpenAI-compatible LLM client
 │           ├── summarizer.py     #   article summarization
+│           ├── reference_summarizer.py #   reference summaries for kioku (Saved only)
 │           ├── question_suggester.py # chat question suggestions
 │           └── tagger.py         #   bilingual tag suggestion
 ├── frontend/
