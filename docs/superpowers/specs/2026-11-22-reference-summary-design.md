@@ -1,7 +1,7 @@
 # kioku 向け参照用要約（reference_summary）と要約入力の切り詰め修正
 
 - 日付: 2026-11-22
-- 状態: 設計案（承認待ち）
+- 状態: 実装済み（v0.14.5 / v0.15.0）。接続先と認証の方針は 2026-11-22 に確定
 - 関連: `app/ai/processor.py`、`app/ai/summarizer.py`、`app/services/background_processor.py`、`app/routers/exports.py`
 
 ## 目的
@@ -38,7 +38,7 @@ kioku（長期記憶）が Saved の記事を検索で引けるようにする�
 - 既存の `ai_summary` / `tag_suggestions` / `genre` の仕様は変えない。`question_suggester` と
   `tagger` の切り詰めは今回扱わない。
 - 17,775 件の既存 `ai_summary` の再生成はしない（`reference_summary` が kioku の入口になるため）。
-- export の認証（Bearer 鍵）は今回含めない。別ブランチで扱う（「未決事項」）。
+- export の認証（Bearer 鍵）は作らない（「決定事項」）。
 
 ## アンチゴール
 
@@ -176,13 +176,16 @@ kioku（長期記憶）が Saved の記事を検索で引けるようにする�
 どちらも AGENTS.md の作業フロー（ブランチ → テスト → PR → `--no-ff` マージ → バージョン更新 →
 タグ → README → push → LaunchAgent の再読込）に従う。
 
+## 決定事項
+
+- export は認証なしで運用する。tailnet 内に閉じており、中身は記事情報のみのため（2026-11-22 ユーザー判断）。
+  `feat/export-auth` は作らない。
+- lethe への接続先は `http://100.123.63.64:11434/v1`（IP 直指定）で確定。Ollama は tailnet ホスト名
+  （Host ヘッダー）を受けず FQDN だと 403 になるため、FQDN には戻さない。IP は tailnet の再採番で
+  止まる（2026-09-08 の前例）ので、LLM 呼び出しが全滅したら lethe の現在 IP を確認する。
+
 ## 未決事項
 
-- export の Bearer 認証: 今の API は tailnet 内なら誰でも読める。kioku 側は鍵をファイルで持てる。
-  別ブランチ（`feat/export-auth`）で扱う。
-- lethe への接続先は、当面 `http://100.123.63.64:11434/v1`（IP 直指定）。FQDN は Ollama の Host
-  ヘッダー検査で 403 になるため、`0.0.0.0` で待ち受けて pf で tailnet に限る形へ lethe 側を直した
-  あとで、FQDN に戻す。IP 直指定は tailnet の再採番で止まる（2026-09-08 の前例）。
 - `question_suggester`（2,000 / 1,500 字）と `tagger`（500 字）の切り詰めは、今回は直さない。
 
 ## 実装者に任せること
