@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 
 MIN_SUMMARY_BULLETS = 1
 MAX_SUMMARY_BULLETS = 9
@@ -51,3 +52,52 @@ def clip_for_llm(text: str, limit: int) -> str:
     head = limit * _CLIP_HEAD_RATIO_NUM // _CLIP_HEAD_RATIO_DEN
     tail = limit // 3
     return text[:head] + CLIP_SEPARATOR + text[-tail:]
+
+
+# 改行を入れる（= 段落の区切りになる）ブロック要素
+_BLOCK_TAGS = frozenset(
+    {"p", "div", "br", "li", "ul", "ol", "tr", "table", "blockquote", "pre",
+     "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "figure", "hr"}
+)
+_SKIP_TAGS = frozenset({"script", "style"})  # 中身ごと捨てる
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip_depth += 1
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth:
+            self.parts.append(data)
+
+
+def html_to_text(html: str) -> str:
+    """抽出済み本文の HTML を文章にする。タグと属性は捨て、ブロック要素の境目を改行にする。
+
+    HTML のまま LLM に渡すと、属性や img タグがトークンを食って、同じ字数でも
+    文章の量が大きく減る。プレーンテキストを渡しても中身は変わらない。
+    """
+    parser = _TextExtractor()
+    parser.feed(html)
+    parser.close()
+    lines = (line.strip() for line in "".join(parser.parts).splitlines())
+    return "\n".join(line for line in lines if line)
+
+
+def prepare_for_llm(text: str, limit: int) -> str:
+    """LLM に渡す本文を作る。HTML を文章にしてから limit 字に収める。"""
+    return clip_for_llm(html_to_text(text), limit)

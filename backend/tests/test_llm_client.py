@@ -240,3 +240,32 @@ async def test_frequency_penalty_sent_when_requested(monkeypatch):
     finally:
         await task_queue.stop()
     assert captured["payload"]["frequency_penalty"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_logs_prompt_tokens(monkeypatch, caplog):
+    """prompt_tokens を残す。送った長さより明らかに少なければ、サーバーが黙って切ったと分かる。"""
+    factory = _fake_client_factory({})
+
+    class _UsageResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1234, "completion_tokens": 7},
+            }
+
+    class _UsageClient(factory):  # type: ignore[misc, valid-type]
+        async def post(self, url, json):
+            return _UsageResponse()
+
+    monkeypatch.setattr(llm_client.httpx, "AsyncClient", _UsageClient)
+    caplog.set_level("DEBUG", logger="app.ai.llm_client")
+    task_queue.start()
+    try:
+        await llm_client.chat_completion([{"role": "user", "content": "hi"}])
+    finally:
+        await task_queue.stop()
+    assert "prompt_tokens=1234" in caplog.text

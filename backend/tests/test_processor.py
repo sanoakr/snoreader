@@ -59,3 +59,20 @@ async def test_summarize_and_tag_passes_article_tail(monkeypatch):
     text = "あ" * 20_000 + "結論マーカー"
     await processor.summarize_and_tag("題", text)
     assert "結論マーカー" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_summarize_and_tag_strips_html_before_sending(monkeypatch):
+    """HTML のままだとタグ分のトークンを食うので、文章にしてから渡すこと。"""
+    from app.ai import processor
+
+    captured: dict = {}
+
+    async def _fake_chat(messages, **kwargs):
+        captured["user"] = messages[-1]["content"]
+        return "SUMMARY:\n・要約\nTAGS: python|Python"
+
+    monkeypatch.setattr(processor, "chat_completion", _fake_chat)
+    await processor.summarize_and_tag("題", '<p class="x">本文です</p><img src="https://e.com/a.png">')
+    assert "本文です" in captured["user"]
+    assert "<p" not in captured["user"] and "<img" not in captured["user"]
