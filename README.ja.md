@@ -97,6 +97,13 @@ LLM サーバーが利用可能な場合、SnoReader は以下を自動実行す
 - 手動入力された日本語タグを英語に自動翻訳
 - リーダーペイン下部のチャットパネルで記事に関する自由質問を受け付け（セッション内履歴のみ、記事切替でクリア）
 
+### kioku 向けの参照用要約
+
+**Saved** 記事ごとに、バックグラウンドの Phase 4（`reserved` レーン）が `reference_summary` を別に生成する。読むためでなく *引くため* の 600〜1,000 字の要約で、要旨 1〜2 文、固有名詞・版・数値・日付を原文の表記のまま入れた事実 5〜10 個、誰が何を言っているか、情報の時点で構成する。`ai_summary` は置き換えない。
+
+- 新しく Saved にした記事から順に作るので、バックログの途中でも使える。作り直すのは、**プロンプトの版**（`…/ref-vN`）が古いとき、または抜粋由来の要約を、あとから取れた本文で作り直せるときだけ。モデル名の違いだけでは作り直さない。
+- `GET /api/export/saved-articles` に `reference_summary` / `reference_summary_at` / `reference_summary_version` / `reference_basis`（`content` = 本文から、`excerpt` = フィード抜粋から。確かさは低い）/ `genre` を追加。未生成の記事は先の 4 つを `null` で返す。
+
 ### thinking ブロックの除去
 
 `llm_client.chat_completion` は、サーバが本文に残した thinking ブロックを取り除いてから返す。思考の途中で切れていて回答が残らない場合は何も返さない。
@@ -182,6 +189,7 @@ snoreader/
 │       └── ai/
 │           ├── llm_client.py     #   OpenAI 互換 LLM クライアント
 │           ├── summarizer.py     #   記事要約
+│           ├── reference_summarizer.py #   kioku 向け参照用要約（Saved のみ）
 │           ├── question_suggester.py # チャットの質問候補生成
 │           └── tagger.py         #   バイリンガルタグ提案
 ├── frontend/
