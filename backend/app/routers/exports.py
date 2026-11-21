@@ -37,6 +37,13 @@ async def export_saved_articles(session: AsyncSession = Depends(get_session)):
             "summary": a.summary,
             "ai_summary": a.ai_summary,
             "tags": [{"name": t.name, "name_ja": t.name_ja} for t in a.tags],
+            # kioku が検索で引くための参照用要約。未生成の記事はすべて null で返す
+            # （kioku はそのときだけ ai_summary を代わりに使い、あとで入れ替える）
+            "reference_summary": a.reference_summary,
+            "reference_summary_at": a.reference_summary_at,
+            "reference_summary_version": a.reference_summary_version,
+            "reference_basis": a.reference_basis,
+            "genre": a.genre,
         }
         for a in articles
     ]
