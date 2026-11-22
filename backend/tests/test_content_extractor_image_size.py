@@ -90,6 +90,22 @@ def test_declared_image_sizes_prefers_page_markup() -> None:
     }
 
 
+def test_declared_image_sizes_ignores_lazy_placeholder_src() -> None:
+    """遅延読み込みの src はプレースホルダ。宣言サイズは data-* 側の実画像のもの。
+
+    Togetter は実画像 (1200x630) を data-s に置き、src は全アイコンと共有の
+    1x1 p.gif にする。src をキーに宣言サイズを拾うと、寸法なしのアイコンまで
+    1200x630 になり、巨大な「GIF を再生」枠が並ぶ。
+    """
+    html = (
+        '<img class="lazy" data-s="https://cdn.test/item-1200x630.jpeg" '
+        'src="https://cdn.test/p.gif" data-e="https://cdn.test/noimage.png" '
+        'width="1200" height="630"/>'
+        '<img class="lzpk" data-s="0" src="https://cdn.test/p.gif" data-e="1"/>'
+    )
+    assert _declared_image_sizes(html, "https://example.test/a") == {}
+
+
 def test_fix_html_restores_declared_size_on_graphic_tags() -> None:
     """trafilatura の <graphic> は寸法を落とすため、宣言値を復元する。"""
     extracted = '<p><graphic src="https://cdn.test/topic.png"/></p>'

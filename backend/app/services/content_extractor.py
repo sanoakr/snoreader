@@ -27,6 +27,10 @@ _IMG_SRC_ANY_QUOTE_RE = re.compile(r'\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
 _IMG_WIDTH_RE = re.compile(r'\bwidth=["\']?(\d+)', re.IGNORECASE)
 _IMG_HEIGHT_RE = re.compile(r'\bheight=["\']?(\d+)', re.IGNORECASE)
 _HAS_DIMENSION_RE = re.compile(r'\b(?:width|height)=', re.IGNORECASE)
+# 実 URL を別属性に退避する遅延読み込みの印 (Togetter: data-s, 他: data-src 等)
+_LAZY_SRC_ATTR_RE = re.compile(
+    r'\bdata-(?:s|src|original|lazy-src|lazy)=', re.IGNORECASE
+)
 
 # 画像の寸法をリーダー側で予約するため、抽出時に width/height を埋める。
 # 属性が無いと読み込み完了まで高さ 0 のままで、本文を読んでいる最中に
@@ -162,6 +166,10 @@ def _declared_image_sizes(source_html: str, base_url: str) -> dict[str, tuple[in
     """
     sizes: dict[str, tuple[int, int]] = {}
     for tag in _IMG_TAG_RE.findall(source_html):
+        # 遅延読み込みタグの src はプレースホルダで、宣言サイズは実画像のもの。
+        # src をキーにすると同じプレースホルダを使う他の <img> まで巻き込む
+        if _LAZY_SRC_ATTR_RE.search(tag):
+            continue
         src_m = _IMG_SRC_ANY_QUOTE_RE.search(tag)
         w_m = _IMG_WIDTH_RE.search(tag)
         h_m = _IMG_HEIGHT_RE.search(tag)
