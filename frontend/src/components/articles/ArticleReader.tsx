@@ -15,6 +15,9 @@ const GIF_DEFER_MIN_AREA = 40_000;
 // この px 以下の画像は計測ビーコンや遅延読み込みのスペーサーで、本文ではない
 // (Togetter は実 URL を JS で差し込むため 1x1 の p.gif がアイコンの数だけ並ぶ)
 const SPACER_MAX_PX = 2;
+// 遅延読み込み用の 1x1 プレースホルダ GIF のファイル名。v0.15.1 以前に抽出した記事には
+// 別の <img> の宣言サイズ (1200x630) が誤って焼き込まれており、寸法では見分けられない
+const SPACER_GIF_RE = /\/(?:p|blank|spacer|pixel|transparent|1x1)\.gif(?:[?#]|$)/i;
 
 // DOMPurify の設定: 記事コンテンツに必要なタグ・属性を許可しつつスクリプトを排除
 // code.math-tex[data-latex] はバックエンドが数式保護のために挿入するタグ
@@ -46,6 +49,8 @@ function sanitizeContent(html: string): string {
     try {
       if (PROFILE_IMG_HOSTS.includes(new URL(src).hostname)) return '';
     } catch { /* ignore */ }
+
+    if (SPACER_GIF_RE.test(src)) return '';
 
     // バックエンドが抽出時に埋めた表示寸法。あればブラウザが領域を予約する
     const width = tag.match(/\bwidth="(\d+)"/i)?.[1];
