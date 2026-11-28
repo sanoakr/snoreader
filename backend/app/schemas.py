@@ -258,6 +258,8 @@ class ChatMessage(BaseModel):
 class ArticleChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
+    # True: 質問の文面にかかわらず必ず Web 検索する。False/省略: 従来のトリガー判定
+    force_web_search: bool = False
 
 
 class ChatSource(BaseModel):

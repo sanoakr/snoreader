@@ -234,11 +234,12 @@ export function chatWithArticle(
   id: number,
   message: string,
   history: ChatMessage[],
+  forceWebSearch = false,
 ): Promise<ChatResponse> {
   return fetchJSON(`${BASE}/articles/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, force_web_search: forceWebSearch }),
   });
 }
 

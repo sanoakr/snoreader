@@ -106,8 +106,8 @@ export function useSuggestTags() {
 
 export function useChatWithArticle() {
   return useMutation({
-    mutationFn: ({ id, message, history }: { id: number; message: string; history: ChatMessage[] }) =>
-      api.chatWithArticle(id, message, history),
+    mutationFn: ({ id, message, history, forceWebSearch }: { id: number; message: string; history: ChatMessage[]; forceWebSearch?: boolean }) =>
+      api.chatWithArticle(id, message, history, forceWebSearch),
   });
 }
 
