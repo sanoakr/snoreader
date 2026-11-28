@@ -946,8 +946,13 @@ async def chat_about_article(
     sources: list[ChatSource] = []
     if body.force_web_search or web_search.needs_web_search(body.message):
         # 通常トリガー時は記事タイトルを混ぜない（ユーザーが記事外の話題を調べたがっていることが多い）。
-        # 強制検索は「この件はいつから？」のような指示語だけの質問でも当たるよう、タイトルを前置する
-        query = f"{article.title} {body.message}" if body.force_web_search else body.message
+        # 強制検索は「この件はいつから？」のような指示語だけの質問でも当たるよう、
+        # タイトル・会話・質問から LLM で検索語を作る（失敗時はタイトル + 質問）
+        query = body.message
+        if body.force_web_search:
+            from app.ai.search_query import build_search_query
+
+            query = await build_search_query(article.title, body.message, body.history)
         results = await web_search.search(query)
         if results:
             search_used = True

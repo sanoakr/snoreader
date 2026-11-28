@@ -72,6 +72,7 @@ class _Spy:
         self.results = results
         self.search_queries: list[str] = []
         self.system_prompts: list[str] = []
+        self.built_from: list[tuple[str, str, int]] = []
 
 
 @pytest.fixture
@@ -86,7 +87,12 @@ def spy(monkeypatch: pytest.MonkeyPatch) -> _Spy:
         s.system_prompts.append(messages[0]["content"])
         return "回答です"
 
+    async def _build_query(title, message, history=()):
+        s.built_from.append((title, message, len(history)))
+        return "生成された検索語"
+
     monkeypatch.setattr("app.services.web_search.search", _search)
+    monkeypatch.setattr("app.ai.search_query.build_search_query", _build_query)
     monkeypatch.setattr("app.ai.llm_client.chat_completion", _chat)
     return s
 
@@ -103,8 +109,9 @@ async def test_force_flag_searches_even_without_trigger_words(
     body = res.json()
     assert body["search_used"] is True
     assert body["sources"] == [{"title": "速報", "url": "https://news.example/1"}]
-    # 指示語だけの質問でも当たるよう、強制時は記事タイトルを前置する（記事のタイトルは「記事」）
-    assert spy.search_queries == [f"記事 {NO_TRIGGER_MESSAGE}"]
+    # 強制時は LLM が作った検索語で検索する（材料は記事タイトルと質問と履歴）
+    assert spy.search_queries == ["生成された検索語"]
+    assert spy.built_from == [("記事", NO_TRIGGER_MESSAGE, 0)]
     # 強制時は検索結果を「補足」ではなく主な根拠として使わせる文面になる
     assert "primary evidence" in spy.system_prompts[0]
 
@@ -128,8 +135,9 @@ async def test_without_flag_still_searches_on_trigger_words(
         "/api/articles/1/chat", json={"message": "最新の状況を調べて"}
     )
     assert res.json()["search_used"] is True
-    # 通常トリガー時はタイトルを混ぜない（従来どおり）
+    # 通常トリガー時は質問文のまま検索し、検索語の生成は呼ばない（従来どおり）
     assert spy.search_queries == ["最新の状況を調べて"]
+    assert spy.built_from == []
     # 通常トリガー時の文面は従来どおり（強制用の文面に変わっていないこと）
     assert "primary evidence" not in spy.system_prompts[0]
 
@@ -147,3 +155,95 @@ async def test_force_flag_with_no_results_still_answers(
     assert res.status_code == 200
     assert res.json()["search_used"] is False
     assert res.json()["sources"] == []
+
+
+# --- build_search_query（検索語の生成） ---------------------------------------
+
+
+class _Msg:
+    def __init__(self, role: str, content: str) -> None:
+        self.role = role
+        self.content = content
+
+
+def _patch_llm(monkeypatch: pytest.MonkeyPatch, reply, captured: list | None = None) -> None:
+    async def _chat(messages, **kwargs):
+        if captured is not None:
+            captured.append((messages, kwargs))
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr("app.ai.llm_client.chat_completion", _chat)
+
+
+@pytest.mark.asyncio
+async def test_build_query_uses_llm_output_and_gives_it_the_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.ai.search_query import build_search_query
+
+    captured: list = []
+    _patch_llm(monkeypatch, "Counterpoint 低価格スマホ 出荷 2030年", captured)
+    history = [_Msg("user", "どこの調査？"), _Msg("assistant", "Counterpointです")]
+
+    query = await build_search_query("安いスマホが消える", "それはいつから？", history)
+
+    assert query == "Counterpoint 低価格スマホ 出荷 2030年"
+    user_prompt = captured[0][0][1]["content"]
+    # 指示語を解決する材料が全部プロンプトに入っている
+    assert "安いスマホが消える" in user_prompt
+    assert "Counterpointです" in user_prompt
+    assert "それはいつから？" in user_prompt
+    assert captured[0][1]["temperature"] == 0.0
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ('"低価格スマホ 出荷"', "低価格スマホ 出荷"),
+    ("検索クエリ：低価格スマホ 出荷", "低価格スマホ 出荷"),
+    ("Query: low-end phone shipments", "low-end phone shipments"),
+    ("\n低価格スマホ 出荷\n補足説明です", "低価格スマホ 出荷"),  # 2 行目以降は捨てる
+])
+@pytest.mark.asyncio
+async def test_build_query_cleans_llm_output(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: str
+) -> None:
+    from app.ai.search_query import build_search_query
+
+    _patch_llm(monkeypatch, raw)
+    assert await build_search_query("題", "質問") == expected
+
+
+@pytest.mark.asyncio
+async def test_build_query_caps_overlong_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.ai.search_query import MAX_QUERY_LENGTH, build_search_query
+
+    _patch_llm(monkeypatch, "あ" * 500)
+    assert len(await build_search_query("題", "質問")) == MAX_QUERY_LENGTH
+
+
+@pytest.mark.parametrize("reply", [None, "", "   \n", RuntimeError("llm down")])
+@pytest.mark.asyncio
+async def test_build_query_falls_back_to_title_and_message(
+    monkeypatch: pytest.MonkeyPatch, reply
+) -> None:
+    """LLM 失敗・空出力でも検索は止めない（v0.16.1 の「タイトル + 質問」に戻る）。"""
+    from app.ai.search_query import build_search_query
+
+    _patch_llm(monkeypatch, reply)
+    assert await build_search_query("記事題", "それはいつから？") == "記事題 それはいつから？"
+
+
+@pytest.mark.asyncio
+async def test_build_query_only_sends_recent_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.ai.search_query import MAX_HISTORY_MESSAGES, build_search_query
+
+    captured: list = []
+    _patch_llm(monkeypatch, "検索語", captured)
+    history = [_Msg("user", f"古い質問{i}") for i in range(MAX_HISTORY_MESSAGES + 3)]
+
+    await build_search_query("題", "質問", history)
+
+    user_prompt = captured[0][0][1]["content"]
+    assert "古い質問0" not in user_prompt
+    assert f"古い質問{MAX_HISTORY_MESSAGES + 2}" in user_prompt
