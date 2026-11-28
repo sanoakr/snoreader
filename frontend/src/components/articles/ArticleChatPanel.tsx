@@ -27,11 +27,18 @@ function looksLikeSearch(msg: string): boolean {
   return NOW_PATTERN.test(msg);
 }
 
+// 「必ず Web 検索」の設定。記事をまたいで・再読み込み後も保つ（既定 ON）
+const FORCE_SEARCH_KEY = 'snoreader.chat.forceWebSearch';
+function loadForceSearch(): boolean {
+  return localStorage.getItem(FORCE_SEARCH_KEY) !== 'false';
+}
+
 export function ArticleChatPanel({ articleId }: Props) {
   const [history, setHistory] = useState<Entry[]>([]);
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pendingIsSearch, setPendingIsSearch] = useState(false);
+  const [forceSearch, setForceSearch] = useState(loadForceSearch);
   // 会話を踏まえて差し替えた候補。null のあいだは記事単位のキャッシュを出す
   const [followupQuestions, setFollowupQuestions] = useState<string[] | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -64,9 +71,9 @@ export function ArticleChatPanel({ articleId }: Props) {
     setHistory(nextHistory);
     setInput('');
     setError(null);
-    setPendingIsSearch(looksLikeSearch(message));
+    setPendingIsSearch(forceSearch || looksLikeSearch(message));
     chat.mutate(
-      { id: articleId, message, history: priorHistory },
+      { id: articleId, message, history: priorHistory, forceWebSearch: forceSearch },
       {
         onSuccess: (res) => {
           const assistant: AssistantEntry = {
@@ -230,6 +237,25 @@ export function ArticleChatPanel({ articleId }: Props) {
             rows={1}
             className="flex-1 resize-none px-3 py-2 text-sm rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={forceSearch}
+            title="ON: 質問のたびに必ず Web 検索する（ニュースなど記事にない話題向け）。OFF: 検索が要りそうな質問のときだけ検索する"
+            onClick={() => {
+              const next = !forceSearch;
+              setForceSearch(next);
+              localStorage.setItem(FORCE_SEARCH_KEY, String(next));
+            }}
+            className={
+              'shrink-0 px-2 py-2 text-xs rounded-md border transition-colors ' +
+              (forceSearch
+                ? 'border-blue-400 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300'
+                : 'border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800')
+            }
+          >
+            🔍 Web検索 {forceSearch ? 'ON' : 'OFF'}
+          </button>
           <button
             type="submit"
             disabled={chat.isPending || !input.trim()}

@@ -902,6 +902,15 @@ _CHAT_SYSTEM_PROMPT = (
     "- Keep answers to 2-4 sentences. Only go longer if the user explicitly asks for detail."
 )
 _CHAT_CONTEXT_LIMIT = 4000  # 記事本文をプロンプトに埋め込む際の文字数上限
+_CHAT_SEARCH_USAGE = (
+    "Additional web search results (use these to supplement the article "
+    "when the answer is not in the article itself)."
+)
+_CHAT_SEARCH_FORCED_USAGE = (
+    "Web search results for the user's question. The article and your own knowledge may "
+    "be out of date or silent on this, so treat these results as the primary evidence "
+    "for anything beyond the article, and do not contradict them from memory."
+)
 _CHAT_HISTORY_LIMIT = 10    # クライアント履歴の最大保持ターン数
 # 同じ一文を max_tokens まで繰り返す暴走を抑える。0.5 は実測で回答長の中央値を
 # 211 -> 186 字に変えるだけで内容に影響しなかった値（大きくすると脱線が増える）
@@ -935,17 +944,18 @@ async def chat_about_article(
     # Web 検索トリガー判定 → ヒットすればクエリを記事タイトル + ユーザー発言で投げる
     search_used = False
     sources: list[ChatSource] = []
-    if web_search.needs_web_search(body.message):
+    if body.force_web_search or web_search.needs_web_search(body.message):
         # 検索意図のときは記事タイトルを混ぜない（ユーザーが記事外の話題を調べたがっていることが多い）
         results = await web_search.search(body.message)
         if results:
             search_used = True
             sources = [ChatSource(title=r["title"], url=r["url"]) for r in results]
+            # 強制検索はニュースなど記事にも学習データにも無い話題が前提。
+            # 補足扱いだとモデルが検索結果を無視して記憶で答えるので、主な根拠として使わせる
+            usage = _CHAT_SEARCH_FORCED_USAGE if body.force_web_search else _CHAT_SEARCH_USAGE
             system_content += (
                 "\n\n"
-                "Additional web search results (use these to supplement the article "
-                "when the answer is not in the article itself). Cite sources inline by "
-                "the bracketed number when you use them:\n\n"
+                f"{usage} Cite sources inline by the bracketed number when you use them:\n\n"
                 f"{web_search.format_results_for_llm(results)}"
             )
 
