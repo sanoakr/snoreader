@@ -945,8 +945,10 @@ async def chat_about_article(
     search_used = False
     sources: list[ChatSource] = []
     if body.force_web_search or web_search.needs_web_search(body.message):
-        # 検索意図のときは記事タイトルを混ぜない（ユーザーが記事外の話題を調べたがっていることが多い）
-        results = await web_search.search(body.message)
+        # 通常トリガー時は記事タイトルを混ぜない（ユーザーが記事外の話題を調べたがっていることが多い）。
+        # 強制検索は「この件はいつから？」のような指示語だけの質問でも当たるよう、タイトルを前置する
+        query = f"{article.title} {body.message}" if body.force_web_search else body.message
+        results = await web_search.search(query)
         if results:
             search_used = True
             sources = [ChatSource(title=r["title"], url=r["url"]) for r in results]

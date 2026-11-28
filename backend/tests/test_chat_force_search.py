@@ -103,7 +103,8 @@ async def test_force_flag_searches_even_without_trigger_words(
     body = res.json()
     assert body["search_used"] is True
     assert body["sources"] == [{"title": "速報", "url": "https://news.example/1"}]
-    assert spy.search_queries == [NO_TRIGGER_MESSAGE]
+    # 指示語だけの質問でも当たるよう、強制時は記事タイトルを前置する（記事のタイトルは「記事」）
+    assert spy.search_queries == [f"記事 {NO_TRIGGER_MESSAGE}"]
     # 強制時は検索結果を「補足」ではなく主な根拠として使わせる文面になる
     assert "primary evidence" in spy.system_prompts[0]
 
@@ -127,6 +128,8 @@ async def test_without_flag_still_searches_on_trigger_words(
         "/api/articles/1/chat", json={"message": "最新の状況を調べて"}
     )
     assert res.json()["search_used"] is True
+    # 通常トリガー時はタイトルを混ぜない（従来どおり）
+    assert spy.search_queries == ["最新の状況を調べて"]
     # 通常トリガー時の文面は従来どおり（強制用の文面に変わっていないこと）
     assert "primary evidence" not in spy.system_prompts[0]
 
